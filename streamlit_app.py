@@ -40,6 +40,9 @@ st.markdown("""
             border-radius: 10px;
             border-left: 4px solid #64FFDA;
         }
+        .stAlert {
+            border-radius: 8px;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -78,14 +81,20 @@ st.markdown(f"### ✨ *{st.session_state.current_quote}*")
 # Sidebar para configuración
 with st.sidebar:
     st.markdown("## ⚙️ CONFIGURACIÓN API")
-    api_key = st.text_input("oB/wxeBt8LMw9QndCptFxGgCWAUVv6Tr2VyCm7mnZ8+s8BMOn4rdWy4a", type="password", key="api_key")
-    api_secret = st.text_input("E4mIb/OLs5Gb/St+ul5kXw7hWyw+WzW6vr8OM8OuFrZYsGMsplF4IE4UlTqv1YZztlkfwQLrhElbF9b6CwUjtGAA", type="password", key="api_secret")
+    api_key = st.text_input("API Key de Kraken Futures", type="password", key="api_key")
+    api_secret = st.text_input("API Secret de Kraken Futures", type="password", key="api_secret")
     
     st.markdown("## 📊 PARÁMETROS DEL BOT")
     base_leverage = st.slider("Apalancamiento Base", 5, 20, 10)
     max_leverage = st.slider("Apalancamiento Máximo", 25, 50, 50)
     scan_interval = st.slider("Intervalo de Escaneo (segundos)", 3, 10, 5)
+    investment_per_trade = st.number_input("Inversión por Operación (USD)", min_value=5.0, value=10.0, step=5.0)
     
+    st.markdown("## ⚠️ MODO DE TRADING REAL")
+    real_trading_mode = st.checkbox("Activar Trading Real (¡Usa bajo tu propio riesgo!)")
+    if real_trading_mode:
+        st.warning("¡ADVERTENCIA! El trading real puede resultar en pérdidas de capital. Empieza con montos pequeños.")
+
     st.markdown("## 🎯 ACTIVOS A MONITOREAR")
     symbols = st.multiselect(
         "Selecciona los activos",
@@ -110,9 +119,12 @@ col_btn1, col_btn2 = st.columns(2)
 
 with col_btn1:
     if st.button("🚀 ACTIVAR MODO ULTRA", key="start_btn", use_container_width=True):
-        st.session_state.running = True
-        st.session_state.log_messages.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Bot iniciado. Que Dios bendiga las operaciones.")
-        st.rerun()
+        if not api_key or not api_secret:
+            st.error("Por favor, ingresa tu API Key y Secret para iniciar el bot.")
+        else:
+            st.session_state.running = True
+            st.session_state.log_messages.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Bot iniciado. Que Dios bendiga las operaciones.")
+            st.rerun()
 
 with col_btn2:
     if st.button("🛑 DETENER BOT", key="stop_btn", use_container_width=True):
@@ -172,12 +184,29 @@ if st.session_state.running and api_key and api_secret:
                     fuerza_ruptura = abs(precio - last['lower']) / last['lower']
                     lev_sug = min(max_leverage, int(base_leverage + (fuerza_ruptura * 1000)))
                     st.session_state.log_messages.append(f"[{datetime.now().strftime('%H:%M:%S')}] 🎯 ¡OPORTUNIDAD ORO en {symbol}! LONG con {lev_sug}x")
+                    
+                    if real_trading_mode:
+                        try:
+                            amount_to_buy = investment_per_trade / precio
+                            order = exchange.create_market_buy_order(symbol, amount_to_buy, {'leverage': lev_sug})
+                            st.session_state.log_messages.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ ORDEN LONG EJECUTADA en {symbol}. Cantidad: {amount_to_buy:.4f}, Apalancamiento: {lev_sug}x")
+                        except Exception as trade_e:
+                            st.session_state.log_messages.append(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ ERROR al ejecutar LONG en {symbol}: {str(trade_e)}")
+
                 elif precio >= last['upper']:
                     signal = "🔴 SHORT"
                     prox = 0.0
                     fuerza_ruptura = abs(precio - last['upper']) / last['upper']
                     lev_sug = min(max_leverage, int(base_leverage + (fuerza_ruptura * 1000)))
                     st.session_state.log_messages.append(f"[{datetime.now().strftime('%H:%M:%S')}] 🎯 ¡OPORTUNIDAD ORO en {symbol}! SHORT con {lev_sug}x")
+                    
+                    if real_trading_mode:
+                        try:
+                            amount_to_sell = investment_per_trade / precio
+                            order = exchange.create_market_sell_order(symbol, amount_to_sell, {'leverage': lev_sug})
+                            st.session_state.log_messages.append(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ ORDEN SHORT EJECUTADA en {symbol}. Cantidad: {amount_to_sell:.4f}, Apalancamiento: {lev_sug}x")
+                        except Exception as trade_e:
+                            st.session_state.log_messages.append(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ ERROR al ejecutar SHORT en {symbol}: {str(trade_e)}")
                 else:
                     if dist_inf < dist_sup:
                         signal = "📍 CERCA LONG"
@@ -229,5 +258,5 @@ with log_container:
 
 # Auto-refresh cada 5 segundos si está corriendo
 if st.session_state.running:
-    time.sleep(5)
+    time.sleep(scan_interval)
     st.rerun()
