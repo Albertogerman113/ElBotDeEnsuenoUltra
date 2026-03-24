@@ -6,56 +6,87 @@ from datetime import datetime
 import random
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="Agente de Ingresos: Multiplicación Divina", layout="wide")
+st.set_page_config(page_title="DreamBot: Análisis en Vivo", layout="wide")
 
-st.title("💎 AGENTE DE INGRESOS: EJECUCIÓN TOTAL")
-st.write(f"_{datetime.now().strftime('%H:%M:%S')} - Operando con Fe y Estrategia_")
+st.title("💎 AGENTE DE INGRESOS: ANÁLISIS Y EJECUCIÓN")
+st.write(f"_{datetime.now().strftime('%H:%M:%S')} - Vigilando tus activos con precisión_")
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.header("🔐 Activación Final")
+    st.header("🔐 Panel de Control")
     api_key = st.text_input("API Key", type="password")
     api_secret = st.text_input("API Secret", type="password")
-    activar = st.toggle("⚡ ¡INICIAR COSECHA REAL!")
+    activar = st.toggle("⚡ ¡INICIAR MONITORIZACIÓN!")
 
-MARKETS = ['SOL/USD:USD', 'XRP/USD:USD', 'ADA/USD:USD', 'ETH/USD:USD', 'DOT/USD:USD']
+MARKETS = ['SOL/USD:USD', 'XRP/USD:USD', 'ADA/USD:USD', 'ETH/USD:USD', 'DOT/USD:USD', 'BTC/USD:USD']
 
 if activar and api_key and api_secret:
     try:
         exchange = ccxt.krakenfutures({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True})
         
-        # Dashboard Principal
+        # 1. BALANCE Y CAPITAL
         balance = exchange.fetch_total_balance()
-        capital = float(balance.get('USD', 6.55))
-        st.metric("Capital Actual", f"${capital:.4f} USD")
+        capital = float(balance.get('USD', 0))
+        st.metric("Margen Total (Equity)", f"${capital:.4f} USD")
         
-        st.subheader("📡 Radar de Proximidad en Tiempo Real")
+        # 2. SECCIÓN DE POSICIONES ABIERTAS (Lo que pediste)
+        st.subheader("📡 Operaciones Activas en Kraken")
+        pos_placeholder = st.empty()
+        
+        # 3. RADAR DE MERCADO
+        st.subheader("🔍 Radar de Próximas Entradas")
         radar_placeholder = st.empty()
-        log = st.expander("📝 Bitácora de Operaciones Reales", expanded=True)
+        
+        log = st.expander("📝 Bitácora de Movimientos", expanded=True)
 
         while True:
-            radar_data = []
-            
-            # 1. GESTIÓN DE POSICIONES EXISTENTES (Cierre de ganancia)
+            # --- PARTE A: ANALIZAR LO QUE ESTÁ ABIERTO ---
             try:
-                pos = exchange.fetch_positions()
-                for p in pos:
+                posiciones = exchange.fetch_positions()
+                pos_activas = []
+                for p in posiciones:
                     contracts = p.get('contracts')
                     if contracts is not None and float(contracts) > 0:
                         pnl = float(p.get('unrealizedPnl', 0))
-                        if pnl > 0.02: 
-                            side = 'sell' if p['side'] == 'long' else 'buy'
-                            exchange.create_market_order(p['symbol'], side, float(contracts), params={'reduceOnly': True})
-                            log.success(f"💰 GANANCIA COSECHADA: +${pnl:.2f} en {p['symbol']}")
-            except Exception as e:
-                pass
+                        entrada = float(p.get('entryPrice', 0))
+                        actual = float(p.get('markPrice', 0))
+                        lado = p.get('side').upper()
+                        simbolo = p.get('symbol')
+                        
+                        # Análisis de la operación
+                        estado_op = "✅ GANANDO" if pnl > 0 else "❌ EN ESPERA"
+                        consejo = "Mantener" if pnl < 0.05 else "🔥 LISTO PARA COSECHAR"
+                        
+                        pos_activas.append({
+                            "ACTIVO": simbolo,
+                            "LADO": lado,
+                            "CONTRATOS": contracts,
+                            "PRECIO ENTRADA": entrada,
+                            "PRECIO ACTUAL": actual,
+                            "P&L (USD)": f"${pnl:.4f}",
+                            "ANÁLISIS": estado_op,
+                            "ACCIÓN": consejo
+                        })
+                        
+                        # Cierre automático si hay ganancia para interés compuesto
+                        if pnl > 0.04: 
+                            side_cierre = 'sell' if p['side'] == 'long' else 'buy'
+                            exchange.create_market_order(simbolo, side_cierre, float(contracts), params={'reduceOnly': True})
+                            log.success(f"💰 CERRADA: {simbolo} con ${pnl:.2f} de ganancia.")
 
-            # 2. ESCANEO DE MERCADO
+                if pos_activas:
+                    pos_placeholder.table(pd.DataFrame(pos_activas))
+                else:
+                    pos_placeholder.info("No hay operaciones abiertas en este momento. El bot está cazando.")
+            except Exception as e:
+                pos_placeholder.error(f"Error leyendo posiciones: {e}")
+
+            # --- PARTE B: RADAR DE PRÓXIMAS ENTRADAS ---
+            radar_data = []
             for symbol in MARKETS:
                 try:
                     bars = exchange.fetch_ohlcv(symbol, timeframe='5m', limit=20)
                     if not bars: continue
-                    
                     df = pd.DataFrame(bars, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
                     precio = float(df['c'].iloc[-1])
                     ma = df['c'].mean()
@@ -63,34 +94,19 @@ if activar and api_key and api_secret:
                     b_inf = ma - (1.6 * std)
                     
                     dist_inf = ((precio - b_inf) / b_inf) * 100
-                    status = "🔥 ¡ENTRANDO!" if precio <= b_inf else "⏳ BUSCANDO"
+                    status = "🔥 ¡ZONA DE DISPARO!" if precio <= b_inf else "⏳ CAZANDO"
                     
-                    radar_data.append({"ACTIVO": symbol, "PRECIO": precio, "FALTA %": f"{max(0, dist_inf):.3f}%", "ESTADO": status})
+                    radar_data.append({"ACTIVO": symbol, "PRECIO": precio, "DISTANCIA A BANDA": f"{max(0, dist_inf):.3f}%", "ESTADO": status})
 
-                    # 3. DISPARO REAL
-                    if status == "🔥 ¡ENTRANDO!":
-                        # Usamos 30x para estar súper seguros de que Kraken acepte con los $6.55
-                        poder_compra = capital * 30 
-                        qty = round(poder_compra / precio, 2)
-                        
-                        log.info(f"🚀 {symbol} detectado. Intentando abrir orden...")
-                        try:
-                            order = exchange.create_market_order(symbol, 'buy', qty)
-                            log.success(f"✅ ORDEN ABIERTA EN {symbol}. ¡Gloria a Dios!")
-                            st.components.v1.html("""<audio autoplay><source src="https://www.soundjay.com/buttons/beep-07.mp3"></audio>""", height=0)
-                            time.sleep(30)
-                        except Exception as e:
-                            # Intento de rescate con tamaño mínimo
-                            log.warning(f"Ajustando tamaño por seguridad...")
-                            try:
-                                exchange.create_market_order(symbol, 'buy', round(qty * 0.7, 2))
-                                log.success(f"✅ Orden abierta con ajuste de margen.")
-                            except:
-                                log.error(f"Kraken no permitió la entrada en {symbol}.")
-                except:
-                    continue
+                    # Ejecución de nueva orden si hay margen
+                    if status == "🔥 ¡ZONA DE DISPARO!" and len(pos_activas) < 2:
+                        poder = capital * 30
+                        qty = round(poder / precio, 1)
+                        log.info(f"🚀 Intentando abrir {symbol}...")
+                        exchange.create_market_order(symbol, 'buy', qty)
+                        log.success(f"✅ ORDEN ABIERTA: {symbol}")
+                except: continue
 
-            # Actualizar Interfaz
             if radar_data:
                 radar_placeholder.table(pd.DataFrame(radar_data))
             
@@ -101,4 +117,4 @@ if activar and api_key and api_secret:
         st.error(f"Error de Sistema: {e}")
         time.sleep(15)
 else:
-    st.info("Configura tus llaves y activa el bot. El Agente está listo.")
+    st.info("Activa el Agente para ver tus operaciones abiertas y el análisis de mercado.")
