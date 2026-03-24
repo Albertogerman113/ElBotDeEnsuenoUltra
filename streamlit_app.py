@@ -15,6 +15,19 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# MAPA GLOBAL DE SÍMBOLOS (Fuera de la clase para evitar errores de caché)
+SYMBOL_MAP = {
+    'SOL/USD:USD': 'PI_SOLUSD',
+    'BTC/USD:USD': 'PI_XBTUSD',
+    'ETH/USD:USD': 'PI_ETHUSD',
+    'XRP/USD:USD': 'PI_XRPUSD',
+    'ADA/USD:USD': 'PI_ADAUSD',
+    'LINK/USD:USD': 'PI_LINKUSD',
+    'DOT/USD:USD': 'PI_DOTUSD',
+    'AVAX/USD:USD': 'PI_AVAXUSD'
+}
+REVERSE_MAP = {v: k for k, v in SYMBOL_MAP.items()}
+
 # CSS personalizado
 st.markdown("""
     <style>
@@ -71,19 +84,6 @@ class BotEngine:
         self.log_messages = []
         self.open_positions = {}
         self.last_quote_time = time.time()
-        # Mapeo de símbolos para unificar nombres de escaneo con IDs de Kraken
-        self.symbol_map = {
-            'SOL/USD:USD': 'PI_SOLUSD',
-            'BTC/USD:USD': 'PI_XBTUSD',
-            'ETH/USD:USD': 'PI_ETHUSD',
-            'XRP/USD:USD': 'PI_XRPUSD',
-            'ADA/USD:USD': 'PI_ADAUSD',
-            'LINK/USD:USD': 'PI_LINKUSD',
-            'DOT/USD:USD': 'PI_DOTUSD',
-            'AVAX/USD:USD': 'PI_AVAXUSD'
-        }
-        # Inverso del mapa para auditoría
-        self.reverse_map = {v: k for k, v in self.symbol_map.items()}
         
     def log(self, message):
         ts = datetime.now().strftime("%H:%M:%S")
@@ -118,8 +118,8 @@ class BotEngine:
                 contracts = float(pos.get('contracts', 0))
                 if contracts != 0:
                     symbol_id = pos.get('symbol', 'Unknown')
-                    # Intentamos normalizar el nombre al formato de escaneo
-                    normalized_symbol = self.reverse_map.get(symbol_id, symbol_id)
+                    # Normalizar nombre usando el mapa global
+                    normalized_symbol = REVERSE_MAP.get(symbol_id, symbol_id)
                     
                     info = pos.get('info', {})
                     entry_price = float(pos.get('entryPrice', 0) or 
@@ -231,7 +231,7 @@ class BotEngine:
             for symbol in symbols:
                 try:
                     # Usamos el ID de Kraken para pedir los datos OHLCV
-                    kraken_id = self.symbol_map.get(symbol, symbol)
+                    kraken_id = SYMBOL_MAP.get(symbol, symbol)
                     bars = self.exchange.fetch_ohlcv(kraken_id, timeframe='5m', limit=50)
                     df = pd.DataFrame(bars, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
                     df['ma'] = df['close'].rolling(window=20).mean()
@@ -305,7 +305,14 @@ with st.sidebar:
     max_lev = st.slider("Lev Max", 25, 50, 50)
     inv = st.number_input("Inversión (USD)", min_value=5.0, value=10.0)
     real_mode = st.checkbox("TRADING REAL")
-    symbols_to_scan = st.multiselect("Activos", list(bot_engine.symbol_map.keys()), default=['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD'])
+    
+    # Símbolos para escaneo (usando el mapa global)
+    symbols_to_scan = st.multiselect("Activos", list(SYMBOL_MAP.keys()), default=['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD'])
+    
+    st.divider()
+    if st.button("🧹 LIMPIAR MEMORIA DEL BOT"):
+        st.cache_resource.clear()
+        st.rerun()
 
 # Métricas
 c1, c2, c3 = st.columns(3)
