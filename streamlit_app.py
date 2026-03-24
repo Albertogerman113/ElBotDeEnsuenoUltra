@@ -78,8 +78,8 @@ st.markdown(f"### ✨ *{st.session_state.current_quote}*")
 # Sidebar para configuración
 with st.sidebar:
     st.markdown("## ⚙️ CONFIGURACIÓN API")
-    api_key = st.text_input("API Key de Kraken Futures", type="password", key="api_key")
-    api_secret = st.text_input("API Secret de Kraken Futures", type="password", key="api_secret")
+    api_key = st.text_input("oB/wxeBt8LMw9QndCptFxGgCWAUVv6Tr2VyCm7mnZ8+s8BMOn4rdWy4a", type="password", key="api_key")
+    api_secret = st.text_input("E4mIb/OLs5Gb/St+ul5kXw7hWyw+WzW6vr8OM8OuFrZYsGMsplF4IE4UlTqv1YZztlkfwQLrhElbF9b6CwUjtGAA", type="password", key="api_secret")
     
     st.markdown("## 📊 PARÁMETROS DEL BOT")
     base_leverage = st.slider("Apalancamiento Base", 5, 20, 10)
