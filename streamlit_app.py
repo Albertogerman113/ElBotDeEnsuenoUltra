@@ -187,14 +187,16 @@ with st.sidebar:
     api_secret = st.text_input("API Secret", type="password")
 
     st.divider()
-    st.markdown("### ⚙️ Parámetros de Cosecha")
-    meta_diaria    = st.number_input("Meta del Día (USD)",   value=100.0, min_value=1.0)
-    apalancamiento = st.slider("Apalancamiento (×)", min_value=5, max_value=50, value=20, step=5)
-    tp_pct         = st.slider("Take Profit (%)",    min_value=0.3, max_value=3.0, value=0.8, step=0.1)
-    sl_pct         = st.slider("Stop Loss (%)",      min_value=0.3, max_value=3.0, value=0.5, step=0.1)
-    max_pos        = st.slider("Máx. posiciones simultáneas", min_value=1, max_value=5, value=3)
-
+    meta_diaria = st.number_input("🎯 Meta del Día (USD)", value=100.0, min_value=1.0)
+    st.caption("El agente toma todas las decisiones automáticamente 🙏")
     st.divider()
+
+    # Parámetros internos — el bot decide solo
+    apalancamiento = 20
+    tp_pct         = 0.8
+    sl_pct         = 0.5
+    max_pos        = 3
+
     activar = st.toggle("⚡ ¡INICIAR COSECHA 24/7!", value=False)
     if activar:
         st.success("🟢 Agente ACTIVO")
