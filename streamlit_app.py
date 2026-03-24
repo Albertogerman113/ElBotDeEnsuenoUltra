@@ -54,7 +54,7 @@ APALANCAMIENTO = 20
 TP_PCT         = 0.8   # Take profit %
 SL_PCT         = 0.5   # Stop loss %
 MAX_POS        = 3     # Máx posiciones simultáneas
-CAPITAL_RISK   = 0.15  # 15% del margen por operación
+
 
 # ─────────────────────────────────────────────
 #  HELPERS
@@ -160,7 +160,8 @@ def evaluate_signal(df: pd.DataFrame) -> dict:
 
 
 def calc_position_size(available_margin: float, precio: float) -> float:
-    return (available_margin * CAPITAL_RISK * APALANCAMIENTO) / precio
+    # Multiplicador 40x igual al código original — probado desde $6 USD
+    return (available_margin * 40) / precio
 
 
 # ─────────────────────────────────────────────
@@ -375,7 +376,7 @@ if activar and api_key and api_secret:
                         raw_qty = calc_position_size(available_margin, sig['precio'])
                         qty     = round_qty(symbol, raw_qty)
 
-                        if qty >= min_q:
+                        if qty > 0:
                             direction = 'buy' if 'LONG' in sig['signal'] else 'sell'
                             try:
                                 exchange.create_market_order(symbol, direction, qty)
