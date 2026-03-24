@@ -104,34 +104,27 @@ class BotEngine:
             for pos in positions:
                 contracts = float(pos.get('contracts', 0))
                 if contracts != 0:
-                    symbol = pos.get('symbol', 'Unknown')
+                    # Kraken Futures usa IDs internos como 'PI_ADAUSD'
+                    # Necesitamos el ID exacto para pedir el precio después
+                    symbol_id = pos.get('symbol', 'Unknown')
                     
                     # EXTRACCIÓN PROFUNDA DE PRECIO DE ENTRADA
-                    # Kraken Futures a veces lo pone en 'entryPrice', otras en 'avgEntryPrice'
-                    # o dentro del diccionario 'info'
                     info = pos.get('info', {})
                     entry_price = float(pos.get('entryPrice', 0) or 
                                       pos.get('avgEntryPrice', 0) or 
                                       info.get('entryPrice', 0) or 
                                       info.get('price', 0) or 0)
                     
-                    # Si sigue siendo 0, intentamos obtenerlo del historial de órdenes (último recurso)
-                    if entry_price == 0:
-                        self.log(f"⚠️ Precio de entrada no encontrado para {symbol}, usando precio actual temporalmente.")
-                        ticker = self.exchange.fetch_ticker(symbol)
-                        entry_price = float(ticker['last'])
-                    
-                    current_price = float(pos.get('markPrice', 0) or 0)
                     side = pos.get('side', 'long').lower()
                     
-                    self.open_positions[symbol] = {
+                    self.open_positions[symbol_id] = {
                         'contracts': abs(contracts),
                         'entry_price': entry_price,
-                        'current_price': current_price,
+                        'current_price': 0.0,
                         'side': side,
-                        'pnl': 0.0 # Se calculará dinámicamente
+                        'pnl': 0.0
                     }
-                    self.log(f"📍 Posición: {symbol} | {side.upper()} | Entrada: ${entry_price:.4f}")
+                    self.log(f"📍 Posición: {symbol_id} | {side.upper()} | Entrada: ${entry_price:.4f}")
             
             if not self.open_positions:
                 self.log("✅ No hay posiciones abiertas.")
@@ -152,59 +145,66 @@ class BotEngine:
             if not self.exchange or not self.open_positions:
                 return
             
-            for symbol in list(self.open_positions.keys()):
-                pos = self.open_positions[symbol]
+            for symbol_id in list(self.open_positions.keys()):
+                pos = self.open_positions[symbol_id]
                 
-                # TICKER FORZADO: Obtener precio actual real del mercado
-                ticker = self.exchange.fetch_ticker(symbol)
-                precio_actual = float(ticker['last'])
-                pos['current_price'] = precio_actual
+                # OBTENER PRECIO ACTUAL USANDO EL ID EXACTO DE KRAKEN
+                try:
+                    ticker = self.exchange.fetch_ticker(symbol_id)
+                    precio_actual = float(ticker['last'])
+                    pos['current_price'] = precio_actual
+                except Exception as e:
+                    self.log(f"⚠️ No se pudo obtener precio para {symbol_id}: {str(e)}")
+                    continue
                 
-                # CÁLCULO MANUAL DE PNL % (Soporte para Shorts)
-                if pos['entry_price'] > 0:
+                # CÁLCULO MANUAL DE PNL %
+                if pos['entry_price'] > 0 and precio_actual > 0:
                     if pos['side'] == 'long':
                         pos['pnl'] = ((precio_actual - pos['entry_price']) / pos['entry_price']) * 100
                     else: # short
                         pos['pnl'] = ((pos['entry_price'] - precio_actual) / pos['entry_price']) * 100
                 
                 # Obtener Bandas de Bollinger para decisión de cierre
-                bars = self.exchange.fetch_ohlcv(symbol, timeframe='5m', limit=50)
-                df = pd.DataFrame(bars, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-                df['ma'] = df['close'].rolling(window=20).mean()
-                df['std'] = df['close'].rolling(window=20).std()
-                df['upper'] = df['ma'] + (2 * df['std'])
-                df['lower'] = df['ma'] - (2 * df['std'])
-                
-                last = df.iloc[-1]
-                
-                should_close = False
-                reason = ""
-                
-                if pos['side'] == 'long':
-                    if precio_actual >= last['upper']:
-                        should_close = True
-                        reason = "TP (Banda Superior)"
-                    elif precio_actual < pos['entry_price'] * 0.95:
-                        should_close = True
-                        reason = "Stop Loss (5%)"
-                elif pos['side'] == 'short':
-                    if precio_actual <= last['lower']:
-                        should_close = True
-                        reason = "TP (Banda Inferior)"
-                    elif precio_actual > pos['entry_price'] * 1.05:
-                        should_close = True
-                        reason = "Stop Loss (5%)"
-                
-                if should_close:
-                    try:
-                        if pos['side'] == 'long':
-                            self.exchange.create_market_sell_order(symbol, pos['contracts'])
-                        else:
-                            self.exchange.create_market_buy_order(symbol, pos['contracts'])
-                        self.log(f"✅ CERRADA: {symbol} | {reason} | PnL: {pos['pnl']:.2f}%")
-                        del self.open_positions[symbol]
-                    except Exception as e:
-                        self.log(f"❌ Error cerrando {symbol}: {str(e)}")
+                try:
+                    bars = self.exchange.fetch_ohlcv(symbol_id, timeframe='5m', limit=50)
+                    df = pd.DataFrame(bars, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+                    df['ma'] = df['close'].rolling(window=20).mean()
+                    df['std'] = df['close'].rolling(window=20).std()
+                    df['upper'] = df['ma'] + (2 * df['std'])
+                    df['lower'] = df['ma'] - (2 * df['std'])
+                    
+                    last = df.iloc[-1]
+                    
+                    should_close = False
+                    reason = ""
+                    
+                    if pos['side'] == 'long':
+                        if precio_actual >= last['upper']:
+                            should_close = True
+                            reason = "TP (Banda Superior)"
+                        elif precio_actual < pos['entry_price'] * 0.95:
+                            should_close = True
+                            reason = "Stop Loss (5%)"
+                    elif pos['side'] == 'short':
+                        if precio_actual <= last['lower']:
+                            should_close = True
+                            reason = "TP (Banda Inferior)"
+                        elif precio_actual > pos['entry_price'] * 1.05:
+                            should_close = True
+                            reason = "Stop Loss (5%)"
+                    
+                    if should_close:
+                        try:
+                            if pos['side'] == 'long':
+                                self.exchange.create_market_sell_order(symbol_id, pos['contracts'])
+                            else:
+                                self.exchange.create_market_buy_order(symbol_id, pos['contracts'])
+                            self.log(f"✅ CERRADA: {symbol_id} | {reason} | PnL: {pos['pnl']:.2f}%")
+                            del self.open_positions[symbol_id]
+                        except Exception as e:
+                            self.log(f"❌ Error cerrando {symbol_id}: {str(e)}")
+                except:
+                    continue
         except Exception as e:
             self.log(f"⚠️ Error en gestión de cierre: {str(e)}")
     
@@ -278,7 +278,8 @@ with st.sidebar:
     max_lev = st.slider("Lev Max", 25, 50, 50)
     inv = st.number_input("Inversión (USD)", min_value=5.0, value=10.0)
     real_mode = st.checkbox("TRADING REAL")
-    symbols = st.multiselect("Activos", ['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD', 'XRP/USD:USD', 'ADA/USD:USD'], default=['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD'])
+    # Símbolos para escaneo (estos son los nombres que CCXT entiende para OHLCV)
+    symbols_to_scan = st.multiselect("Activos", ['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD', 'XRP/USD:USD', 'ADA/USD:USD'], default=['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD'])
 
 # Métricas
 c1, c2, c3 = st.columns(3)
@@ -305,17 +306,17 @@ if st.session_state.running:
     # Primero gestionamos posiciones para actualizar PnL
     bot_engine.check_and_close_positions()
     # Luego escaneamos nuevas oportunidades
-    res = bot_engine.scan_and_trade(symbols, base_lev, max_lev, inv, real_mode)
+    res = bot_engine.scan_and_trade(symbols_to_scan, base_lev, max_lev, inv, real_mode)
     
     if res: st.table(pd.DataFrame(res))
     
     if bot_engine.open_positions:
         st.markdown("### 📍 POSICIONES ABIERTAS")
         pos_list = []
-        for s, p in bot_engine.open_positions.items():
+        for s_id, p in bot_engine.open_positions.items():
             pnl_val = p.get('pnl', 0.0)
             pos_list.append({
-                "ACTIVO": s,
+                "ACTIVO": s_id,
                 "LADO": p['side'].upper(),
                 "CONTRATOS": f"{p['contracts']:.4f}",
                 "ENTRADA": f"${p['entry_price']:.4f}",
