@@ -105,11 +105,21 @@ class BotEngine:
                 contracts = float(pos.get('contracts', 0))
                 if contracts != 0:
                     symbol = pos.get('symbol', 'Unknown')
-                    # Kraken Futures usa entryPrice para el precio de apertura
-                    entry_price = float(pos.get('entryPrice', 0) or pos.get('contractSize', 0) or 0)
-                    # Si el entryPrice es 0, intentamos obtenerlo de otra forma
+                    
+                    # EXTRACCIÓN PROFUNDA DE PRECIO DE ENTRADA
+                    # Kraken Futures a veces lo pone en 'entryPrice', otras en 'avgEntryPrice'
+                    # o dentro del diccionario 'info'
+                    info = pos.get('info', {})
+                    entry_price = float(pos.get('entryPrice', 0) or 
+                                      pos.get('avgEntryPrice', 0) or 
+                                      info.get('entryPrice', 0) or 
+                                      info.get('price', 0) or 0)
+                    
+                    # Si sigue siendo 0, intentamos obtenerlo del historial de órdenes (último recurso)
                     if entry_price == 0:
-                        entry_price = float(pos.get('avgEntryPrice', 0) or 0)
+                        self.log(f"⚠️ Precio de entrada no encontrado para {symbol}, usando precio actual temporalmente.")
+                        ticker = self.exchange.fetch_ticker(symbol)
+                        entry_price = float(ticker['last'])
                     
                     current_price = float(pos.get('markPrice', 0) or 0)
                     side = pos.get('side', 'long').lower()
@@ -121,7 +131,7 @@ class BotEngine:
                         'side': side,
                         'pnl': 0.0 # Se calculará dinámicamente
                     }
-                    self.log(f"📍 Posición encontrada: {symbol} | {side.upper()} | Entrada: ${entry_price:.4f}")
+                    self.log(f"📍 Posición: {symbol} | {side.upper()} | Entrada: ${entry_price:.4f}")
             
             if not self.open_positions:
                 self.log("✅ No hay posiciones abiertas.")
@@ -145,12 +155,12 @@ class BotEngine:
             for symbol in list(self.open_positions.keys()):
                 pos = self.open_positions[symbol]
                 
-                # Obtener precio actual real (Ticker) para mayor precisión en PnL
+                # TICKER FORZADO: Obtener precio actual real del mercado
                 ticker = self.exchange.fetch_ticker(symbol)
                 precio_actual = float(ticker['last'])
                 pos['current_price'] = precio_actual
                 
-                # Cálculo manual de PnL %
+                # CÁLCULO MANUAL DE PNL % (Soporte para Shorts)
                 if pos['entry_price'] > 0:
                     if pos['side'] == 'long':
                         pos['pnl'] = ((precio_actual - pos['entry_price']) / pos['entry_price']) * 100
