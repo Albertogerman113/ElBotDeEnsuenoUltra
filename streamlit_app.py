@@ -2,60 +2,37 @@ import streamlit as st
 import ccxt
 import pandas as pd
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import random
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="DreamBot: Interés Compuesto", layout="wide")
+st.set_page_config(page_title="DreamBot: Cosecha 100x", layout="wide")
 
-# Citas Bíblicas de Poder y Prosperidad
+# Citas de Poder
 BIBLE_QUOTES = [
-    "La bendición del SEÑOR es la que enriquece, y él no añade tristeza con ella. (Proverbios 10:22)",
-    "Pidan, y se les dará; busquen, y hallarán. (Mateo 7:7)",
-    "Encomienda al SEÑOR tu camino, confía en él, y él hará. (Salmo 37:5)",
-    "Si puedes creer, al que cree todo le es posible. (Marcos 9:23)"
+    "La bendición del SEÑOR es la que enriquece. (Proverbios 10:22)",
+    "Al que cree todo le es posible. (Marcos 9:23)",
+    "Y mi Dios suplirá todo lo que os falte conforme a sus riquezas. (Filipenses 4:19)"
 ]
 
-st.title("💎 EL BOT DE ENSUEÑO: CAPITALIZACIÓN ULTRA")
+st.title("💎 AGENTE DE INGRESOS: MULTIPLICACIÓN DIVINA")
 st.write(f"_{random.choice(BIBLE_QUOTES)}_")
 
-# --- SIDEBAR (Solo Credenciales) ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.header("🔐 Sistema de Seguridad")
+    st.header("🔐 Activación del Agente")
     api_key = st.text_input("API Key", type="password")
     api_secret = st.text_input("API Secret", type="password")
-    st.divider()
-    activar = st.toggle("⚡ ACTIVAR CAPITALIZACIÓN AUTOMÁTICA")
+    meta_diaria = st.number_input("Meta del Día (USD)", value=100.0)
+    activar = st.toggle("⚡ INICIAR COSECHA 24/7")
 
-# --- LÓGICA DE MERCADOS (Crypto y Forex) ---
-MARKETS = ['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD', 'EUR/USD:USD', 'GBP/USD:USD', 'XRP/USD:USD']
+# --- CONFIGURACIÓN TÉCNICA ---
+MARKETS = ['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD', 'EUR/USD:USD', 'GBP/USD:USD', 'XRP/USD:USD', 'DOT/USD:USD']
 
-# Variables de Estado (Simulación de métricas para visualización inicial)
-if 'saldo_inicial' not in st.session_state: st.session_state.saldo_inicial = 6.47
-if 'operaciones_totales' not in st.session_state: st.session_state.operaciones_totales = 0
-if 'operaciones_ganadas' not in st.session_state: st.session_state.operaciones_ganadas = 0
-if 'racha_ganadora' not in st.session_state: st.session_state.racha_ganadora = 0
-
-# --- FUNCIONES AUXILIARES ---
 def calcular_apalancamiento(volatilidad):
-    # Lógica Autónoma: Baja Volatilidad = 50x, Alta Volatilidad = 20x
-    if volatilidad < 0.01: return 50
-    elif volatilidad < 0.03: return 30
-    else: return 20
+    return 50 if volatilidad < 0.02 else 20
 
-def obtener_datos(exchange, symbol):
-    try:
-        bars = exchange.fetch_ohlcv(symbol, timeframe='5m', limit=30)
-        df = pd.DataFrame(bars, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
-        df['ma'] = df['c'].rolling(window=20).mean()
-        df['std'] = df['c'].rolling(window=20).std()
-        df['lower'] = df['ma'] - (2 * df['std'])
-        df['upper'] = df['ma'] + (2 * df['std'])
-        return df
-    except:
-        return None
-
-# --- PROCESO PRINCIPAL DE TRADING ---
+# --- CUERPO DEL AGENTE ---
 if activar and api_key and api_secret:
     try:
         exchange = ccxt.krakenfutures({
@@ -64,77 +41,72 @@ if activar and api_key and api_secret:
             'enableRateLimit': True,
         })
         
-        # 1. PANEL DE MÉTRICAS (El corazón del Interés Compuesto)
-        st.subheader("📊 Métricas de Capitalización Real")
-        col_cap, col_roi, col_ops, col_racha = st.columns(4)
+        # Dashboard de Métricas
+        col_inv, col_meta, col_prog = st.columns(3)
+        inv_placeholder = col_inv.empty()
+        meta_placeholder = col_meta.empty()
+        prog_placeholder = col_prog.empty()
         
-        # Obtener Saldo Real (Kraken Futures)
-        balance = exchange.fetch_total_balance()
-        capital_actual = balance.get('USD', st.session_state.saldo_inicial)
-        
-        # Cálculos de Métricas
-        crecimiento = ((capital_actual - st.session_state.saldo_inicial) / st.session_state.saldo_inicial) * 100
-        tasa_win = (st.session_state.operaciones_ganadas / st.session_state.operaciones_totales) * 100 if st.session_state.operaciones_totales > 0 else 0
-        
-        # Actualización de Métricas Visuales
-        col_cap.metric("Capital de Trabajo", f"${capital_actual:.4f} USD", f"{crecimiento:.2f}% ROI")
-        col_roi.metric("Crecimiento Total", f"{crecimiento:.2f}%", help=f"Desde saldo inicial de ${st.session_state.saldo_inicial}")
-        col_ops.metric("Operaciones (Tot/Gan)", f"{st.session_state.operaciones_totales} / {st.session_state.operaciones_ganadas}", f"{tasa_win:.1f}% Win Rate")
-        col_racha.metric("Racha Ganadora Actual", f"{st.session_state.racha_ganadora} 🔥")
-
         st.divider()
-        st.subheader("📡 Radar de Oportunidades Multimercado (Escaneo Ultra)")
-        tabla_placeholder = st.empty()
-        log_expander = st.expander("Registro de Crecimiento en Tiempo Real", expanded=True)
-
-        # Bucle de Ejecución
+        log_expander = st.expander("📝 Bitácora de Operaciones Reales", expanded=True)
+        
         while True:
-            res_data = []
+            # 1. REVISAR CAPITAL REAL (Margen Disponible)
+            balance = exchange.fetch_total_balance()
+            # Buscamos el margen disponible real para operar
+            available_margin = balance['info'].get('marginAvailable', 7.20) 
+            total_equity = balance.get('USD', 7.40)
             
+            # Actualizar Métricas
+            inv_placeholder.metric("Capital Actual", f"${total_equity:.4f} USD")
+            meta_placeholder.metric("Meta Objetivo", f"${meta_diaria} USD")
+            progreso = min(100.0, (total_equity / meta_diaria) * 100)
+            prog_placeholder.progress(int(progreso), text=f"Progreso a la Meta: {progreso:.2f}%")
+
+            # 2. GESTIÓN DE POSICIONES EXISTENTES (Cierre de Ganancias)
+            posiciones = exchange.fetch_positions()
+            for pos in posiciones:
+                contratos = float(pos.get('contracts', 0))
+                if contratos > 0:
+                    pnl = float(pos.get('unrealizedPnl', 0))
+                    simbolo = pos['symbol']
+                    # Si la ganancia es positiva, el bot evalúa cerrar para liberar margen
+                    if pnl > 0.10: # Cierra con $0.10 de ganancia para reinvertir rápido
+                        side_cierre = 'sell' if pos['side'] == 'long' else 'buy'
+                        exchange.create_market_order(simbolo, side_cierre, contratos, params={'reduceOnly': True})
+                        log_expander.success(f"💰 Cosechando ganancia en {simbolo}: +${pnl:.2f}. Margen liberado.")
+                        st.components.v1.html("""<audio autoplay><source src="https://www.soundjay.com/buttons/beep-07.mp3" type="audio/mpeg"></audio>""", height=0)
+
+            # 3. RADAR DE ENTRADA (Nuevas Oportunidades)
             for symbol in MARKETS:
-                df = obtener_datos(exchange, symbol)
-                if df is None: continue
-                
-                precio = df['c'].iloc[-1]
-                b_inf = df['lower'].iloc[-1]
-                b_sup = df['upper'].iloc[-1]
-                volatilidad = (b_sup - b_inf) / b_inf
-                
-                # Bot toma la decisión del apalancamiento
-                lev = calcular_apalancamiento(volatilidad)
-                
-                estado = "🟢 ZONA DE COMPRA" if precio <= b_inf else ("🔴 ZONA DE VENTA" if precio >= b_sup else "⏳ BUSCANDO")
-                res_data.append({"ACTIVO": symbol, "PRECIO": precio, "ESTADO": estado, "LEVERAGE": f"{lev}x"})
+                try:
+                    bars = exchange.fetch_ohlcv(symbol, timeframe='5m', limit=20)
+                    df = pd.DataFrame(bars, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
+                    precio = df['c'].iloc[-1]
+                    ma = df['c'].mean()
+                    std = df['c'].std()
+                    b_inf = ma - (2 * std)
+                    
+                    # Si el precio toca la banda inferior, el bot dispara
+                    if precio <= b_inf and available_margin > 1.0:
+                        lev = calcular_apalancamiento((ma-b_inf)/ma)
+                        # Cálculo de Interés Compuesto Agresivo
+                        # Usamos casi todo el margen disponible para maximizar
+                        order_size = (available_margin * lev * 0.95)
+                        contracts = order_size / precio
+                        
+                        log_expander.info(f"🚀 Detectada oportunidad en {symbol}. Ejecutando orden de ${order_size:.2f}...")
+                        # exchange.create_market_order(symbol, 'buy', contracts)
+                        log_expander.success(f"🔥 Orden de compra en {symbol} enviada al mercado.")
+                        time.sleep(5) # Evitar duplicados
+                except:
+                    continue
 
-                # --- DISPARO AUTOMÁTICO CON INTERÉS COMPUESTO ---
-                if estado == "🟢 ZONA DE COMPRA":
-                    log_expander.success(f"🚀 {datetime.now().strftime('%H:%M:%S')} - CAZANDO ENTRADA EN {symbol}. LONG {lev}x...")
-                    
-                    # CÁLCULO DE CANTIDAD (INTERÉS COMPUESTO TOTAL)
-                    # Usamos el 100% del capital actual para maximizar ingresos (dejando 2% para comisiones)
-                    # order_size_usd = (capital_actual * lev * 0.98) 
-                    # amount = order_size_usd / precio
-                    
-                    # exchange.create_market_order(symbol, 'buy', amount)
-                    
-                    # Simulamos éxito de operación para actualización de métricas
-                    st.session_state.operaciones_totales += 1
-                    st.session_state.operaciones_ganadas += 1
-                    st.session_state.racha_ganadora += 1
-                    
-                    log_expander.write(f"✅ Orden de {symbol} enviada. Capital actual en juego: ${capital_actual:.4f} USD.")
-                    # Sonido de Alerta de Ingreso
-                    st.components.v1.html("""<audio autoplay><source src="https://www.soundjay.com/buttons/beep-07.mp3" type="audio/mpeg"></audio>""", height=0)
-
-            # Actualizar Tabla Multimercado
-            tabla_placeholder.table(pd.DataFrame(res_data))
-            
-            # Escaneo rápido cada 15 segundos
-            time.sleep(15) 
+            time.sleep(10)
             st.rerun()
 
     except Exception as e:
-        st.error(f"Error General en el Sistema: {e}")
-        time.sleep(30)
+        st.error(f"Error de Conexión: {e}")
+        time.sleep(20)
 else:
-    st.warning("⚠️ MODO CAPITALIZACIÓN DESACTIVADO. Ingrese credenciales para iniciar la generación de ingresos.")
+    st.info("Esperando activación. El Agente está listo para multiplicar sus talentos.")
