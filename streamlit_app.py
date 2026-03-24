@@ -103,20 +103,29 @@ class BotEngine:
             
             for pos in positions:
                 contracts = float(pos.get('contracts', 0))
-                if contracts > 0:
+                if contracts != 0: # Puede ser negativo en algunos exchanges, Kraken usa side
                     symbol = pos.get('symbol', 'Unknown')
+                    # Kraken Futures usa entryPrice para el precio de apertura
                     entry_price = float(pos.get('entryPrice', 0) or pos.get('contractSize', 0) or 0)
                     current_price = float(pos.get('markPrice', 0) or 0)
-                    pnl = float(pos.get('percentage', 0) or 0)
+                    side = pos.get('side', 'long').lower()
+                    
+                    # Cálculo manual de PnL % para mayor precisión
+                    pnl_pct = 0.0
+                    if entry_price > 0 and current_price > 0:
+                        if side == 'long':
+                            pnl_pct = ((current_price - entry_price) / entry_price) * 100
+                        else: # short
+                            pnl_pct = ((entry_price - current_price) / entry_price) * 100
                     
                     self.open_positions[symbol] = {
-                        'contracts': contracts,
+                        'contracts': abs(contracts),
                         'entry_price': entry_price,
                         'current_price': current_price,
-                        'side': pos.get('side', 'long'),
-                        'pnl': pnl
+                        'side': side,
+                        'pnl': pnl_pct
                     }
-                    self.log(f"📍 Posición encontrada: {symbol} | {contracts} contratos | PnL: {pnl:.2f}%")
+                    self.log(f"📍 Posición encontrada: {symbol} | {side.upper()} | PnL: {pnl_pct:.2f}%")
             
             if not self.open_positions:
                 self.log("✅ No hay posiciones abiertas.")
@@ -150,6 +159,13 @@ class BotEngine:
                 last = df.iloc[-1]
                 precio_actual = float(last['close'])
                 
+                # Actualizar PnL en tiempo real para la tabla
+                if pos['entry_price'] > 0:
+                    if pos['side'] == 'long':
+                        pos['pnl'] = ((precio_actual - pos['entry_price']) / pos['entry_price']) * 100
+                    else:
+                        pos['pnl'] = ((pos['entry_price'] - precio_actual) / pos['entry_price']) * 100
+                
                 should_close = False
                 reason = ""
                 
@@ -174,7 +190,7 @@ class BotEngine:
                             self.exchange.create_market_sell_order(symbol, pos['contracts'])
                         else:
                             self.exchange.create_market_buy_order(symbol, pos['contracts'])
-                        self.log(f"✅ CERRADA: {symbol} | {reason}")
+                        self.log(f"✅ CERRADA: {symbol} | {reason} | PnL: {pos['pnl']:.2f}%")
                         del self.open_positions[symbol]
                     except Exception as e:
                         self.log(f"❌ Error cerrando {symbol}: {str(e)}")
@@ -251,11 +267,11 @@ with st.sidebar:
     max_lev = st.slider("Lev Max", 25, 50, 50)
     inv = st.number_input("Inversión (USD)", min_value=5.0, value=10.0)
     real_mode = st.checkbox("TRADING REAL")
-    symbols = st.multiselect("Activos", ['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD', 'XRP/USD:USD', 'ADA/USD:USD'], default=['SOL/USD:USD', 'BTC/USD:USD'])
+    symbols = st.multiselect("Activos", ['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD', 'XRP/USD:USD', 'ADA/USD:USD'], default=['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD'])
 
 # Métricas
 c1, c2, c3 = st.columns(3)
-c1.metric("ESTADO", "🟢" if st.session_state.running else "🔴")
+c1.metric("ESTADO", "🟢 CORRIENDO" if st.session_state.running else "🔴 DETENIDO")
 c2.metric("BILLETERA", f"${bot_engine.get_balance():.2f}")
 c3.metric("POSICIONES", len(bot_engine.open_positions))
 
@@ -283,16 +299,15 @@ if st.session_state.running:
         st.markdown("### 📍 POSICIONES ABIERTAS")
         pos_list = []
         for s, p in bot_engine.open_positions.items():
-            # Manejo robusto de PnL para evitar errores de tipo
             pnl_val = p.get('pnl', 0.0)
-            if not isinstance(pnl_val, (int, float)): pnl_val = 0.0
+            color = "green" if pnl_val >= 0 else "red"
             
             pos_list.append({
                 "ACTIVO": s,
                 "LADO": p['side'].upper(),
                 "CONTRATOS": f"{p['contracts']:.4f}",
                 "ENTRADA": f"${p['entry_price']:.2f}",
-                "PnL": f"{pnl_val:.2f}%"
+                "PnL %": f"{pnl_val:.2f}%"
             })
         st.table(pd.DataFrame(pos_list))
     
