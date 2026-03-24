@@ -71,6 +71,19 @@ class BotEngine:
         self.log_messages = []
         self.open_positions = {}
         self.last_quote_time = time.time()
+        # Mapeo de símbolos para unificar nombres de escaneo con IDs de Kraken
+        self.symbol_map = {
+            'SOL/USD:USD': 'PI_SOLUSD',
+            'BTC/USD:USD': 'PI_XBTUSD',
+            'ETH/USD:USD': 'PI_ETHUSD',
+            'XRP/USD:USD': 'PI_XRPUSD',
+            'ADA/USD:USD': 'PI_ADAUSD',
+            'LINK/USD:USD': 'PI_LINKUSD',
+            'DOT/USD:USD': 'PI_DOTUSD',
+            'AVAX/USD:USD': 'PI_AVAXUSD'
+        }
+        # Inverso del mapa para auditoría
+        self.reverse_map = {v: k for k, v in self.symbol_map.items()}
         
     def log(self, message):
         ts = datetime.now().strftime("%H:%M:%S")
@@ -104,11 +117,10 @@ class BotEngine:
             for pos in positions:
                 contracts = float(pos.get('contracts', 0))
                 if contracts != 0:
-                    # Kraken Futures usa IDs internos como 'PI_ADAUSD'
-                    # Necesitamos el ID exacto para pedir el precio después
                     symbol_id = pos.get('symbol', 'Unknown')
+                    # Intentamos normalizar el nombre al formato de escaneo
+                    normalized_symbol = self.reverse_map.get(symbol_id, symbol_id)
                     
-                    # EXTRACCIÓN PROFUNDA DE PRECIO DE ENTRADA
                     info = pos.get('info', {})
                     entry_price = float(pos.get('entryPrice', 0) or 
                                       pos.get('avgEntryPrice', 0) or 
@@ -117,14 +129,15 @@ class BotEngine:
                     
                     side = pos.get('side', 'long').lower()
                     
-                    self.open_positions[symbol_id] = {
+                    self.open_positions[normalized_symbol] = {
                         'contracts': abs(contracts),
                         'entry_price': entry_price,
                         'current_price': 0.0,
                         'side': side,
-                        'pnl': 0.0
+                        'pnl': 0.0,
+                        'kraken_id': symbol_id
                     }
-                    self.log(f"📍 Posición: {symbol_id} | {side.upper()} | Entrada: ${entry_price:.4f}")
+                    self.log(f"📍 Posición: {normalized_symbol} | {side.upper()} | Entrada: ${entry_price:.4f}")
             
             if not self.open_positions:
                 self.log("✅ No hay posiciones abiertas.")
@@ -145,28 +158,26 @@ class BotEngine:
             if not self.exchange or not self.open_positions:
                 return
             
-            for symbol_id in list(self.open_positions.keys()):
-                pos = self.open_positions[symbol_id]
+            for symbol in list(self.open_positions.keys()):
+                pos = self.open_positions[symbol]
+                kraken_id = pos.get('kraken_id', symbol)
                 
-                # OBTENER PRECIO ACTUAL USANDO EL ID EXACTO DE KRAKEN
                 try:
-                    ticker = self.exchange.fetch_ticker(symbol_id)
+                    ticker = self.exchange.fetch_ticker(kraken_id)
                     precio_actual = float(ticker['last'])
                     pos['current_price'] = precio_actual
                 except Exception as e:
-                    self.log(f"⚠️ No se pudo obtener precio para {symbol_id}: {str(e)}")
+                    self.log(f"⚠️ No se pudo obtener precio para {symbol}: {str(e)}")
                     continue
                 
-                # CÁLCULO MANUAL DE PNL %
                 if pos['entry_price'] > 0 and precio_actual > 0:
                     if pos['side'] == 'long':
                         pos['pnl'] = ((precio_actual - pos['entry_price']) / pos['entry_price']) * 100
                     else: # short
                         pos['pnl'] = ((pos['entry_price'] - precio_actual) / pos['entry_price']) * 100
                 
-                # Obtener Bandas de Bollinger para decisión de cierre
                 try:
-                    bars = self.exchange.fetch_ohlcv(symbol_id, timeframe='5m', limit=50)
+                    bars = self.exchange.fetch_ohlcv(kraken_id, timeframe='5m', limit=50)
                     df = pd.DataFrame(bars, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
                     df['ma'] = df['close'].rolling(window=20).mean()
                     df['std'] = df['close'].rolling(window=20).std()
@@ -196,13 +207,13 @@ class BotEngine:
                     if should_close:
                         try:
                             if pos['side'] == 'long':
-                                self.exchange.create_market_sell_order(symbol_id, pos['contracts'])
+                                self.exchange.create_market_sell_order(kraken_id, pos['contracts'])
                             else:
-                                self.exchange.create_market_buy_order(symbol_id, pos['contracts'])
-                            self.log(f"✅ CERRADA: {symbol_id} | {reason} | PnL: {pos['pnl']:.2f}%")
-                            del self.open_positions[symbol_id]
+                                self.exchange.create_market_buy_order(kraken_id, pos['contracts'])
+                            self.log(f"✅ CERRADA: {symbol} | {reason} | PnL: {pos['pnl']:.2f}%")
+                            del self.open_positions[symbol]
                         except Exception as e:
-                            self.log(f"❌ Error cerrando {symbol_id}: {str(e)}")
+                            self.log(f"❌ Error cerrando {symbol}: {str(e)}")
                 except:
                     continue
         except Exception as e:
@@ -219,7 +230,9 @@ class BotEngine:
             scan_data = []
             for symbol in symbols:
                 try:
-                    bars = self.exchange.fetch_ohlcv(symbol, timeframe='5m', limit=50)
+                    # Usamos el ID de Kraken para pedir los datos OHLCV
+                    kraken_id = self.symbol_map.get(symbol, symbol)
+                    bars = self.exchange.fetch_ohlcv(kraken_id, timeframe='5m', limit=50)
                     df = pd.DataFrame(bars, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
                     df['ma'] = df['close'].rolling(window=20).mean()
                     df['std'] = df['close'].rolling(window=20).std()
@@ -236,26 +249,40 @@ class BotEngine:
                     if precio <= last['lower']:
                         signal, prox = "🟢 LONG", 0.0
                         lev = min(max_leverage, int(base_leverage + (abs(precio - last['lower'])/last['lower'] * 1000)))
-                        if real_mode and symbol not in self.open_positions:
-                            amt = investment / precio
-                            self.exchange.create_market_buy_order(symbol, amt, {'leverage': lev})
-                            self.open_positions[symbol] = {'contracts': amt, 'entry_price': precio, 'side': 'long', 'pnl': 0.0}
-                            self.log(f"🚀 LONG: {symbol} {lev}x")
+                        if symbol not in self.open_positions:
+                            if real_mode:
+                                try:
+                                    amt = investment / precio
+                                    self.exchange.create_market_buy_order(kraken_id, amt, {'leverage': lev})
+                                    self.open_positions[symbol] = {'contracts': amt, 'entry_price': precio, 'side': 'long', 'pnl': 0.0, 'kraken_id': kraken_id}
+                                    self.log(f"🚀 ORDEN REAL ENVIADA: LONG {symbol} {lev}x")
+                                except Exception as e:
+                                    self.log(f"❌ Error al abrir LONG {symbol}: {str(e)}")
+                            else:
+                                self.log(f"🔔 SEÑAL DETECTADA: LONG {symbol} (Modo Real APAGADO)")
                     elif precio >= last['upper']:
                         signal, prox = "🔴 SHORT", 0.0
                         lev = min(max_leverage, int(base_leverage + (abs(precio - last['upper'])/last['upper'] * 1000)))
-                        if real_mode and symbol not in self.open_positions:
-                            amt = investment / precio
-                            self.exchange.create_market_sell_order(symbol, amt, {'leverage': lev})
-                            self.open_positions[symbol] = {'contracts': amt, 'entry_price': precio, 'side': 'short', 'pnl': 0.0}
-                            self.log(f"🚀 SHORT: {symbol} {lev}x")
+                        if symbol not in self.open_positions:
+                            if real_mode:
+                                try:
+                                    amt = investment / precio
+                                    self.exchange.create_market_sell_order(kraken_id, amt, {'leverage': lev})
+                                    self.open_positions[symbol] = {'contracts': amt, 'entry_price': precio, 'side': 'short', 'pnl': 0.0, 'kraken_id': kraken_id}
+                                    self.log(f"🚀 ORDEN REAL ENVIADA: SHORT {symbol} {lev}x")
+                                except Exception as e:
+                                    self.log(f"❌ Error al abrir SHORT {symbol}: {str(e)}")
+                            else:
+                                self.log(f"🔔 SEÑAL DETECTADA: SHORT {symbol} (Modo Real APAGADO)")
                     else:
                         if dist_inf < dist_sup: signal, prox = "📍 CERCA LONG", dist_inf
                         else: signal, prox = "📍 CERCA SHORT", dist_sup
                         if prox < 0.1: lev = 25
                     
                     scan_data.append({"ACTIVO": symbol, "PRECIO": f"${precio:.2f}", "ESTADO": signal, "FALTA %": f"{prox:.3f}%", "LEV": f"{lev}x"})
-                except: continue
+                except Exception as e:
+                    self.log(f"⚠️ Error escaneando {symbol}: {str(e)}")
+                    continue
             return scan_data
         except: return []
 
@@ -278,8 +305,7 @@ with st.sidebar:
     max_lev = st.slider("Lev Max", 25, 50, 50)
     inv = st.number_input("Inversión (USD)", min_value=5.0, value=10.0)
     real_mode = st.checkbox("TRADING REAL")
-    # Símbolos para escaneo (estos son los nombres que CCXT entiende para OHLCV)
-    symbols_to_scan = st.multiselect("Activos", ['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD', 'XRP/USD:USD', 'ADA/USD:USD'], default=['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD'])
+    symbols_to_scan = st.multiselect("Activos", list(bot_engine.symbol_map.keys()), default=['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD'])
 
 # Métricas
 c1, c2, c3 = st.columns(3)
@@ -313,10 +339,10 @@ if st.session_state.running:
     if bot_engine.open_positions:
         st.markdown("### 📍 POSICIONES ABIERTAS")
         pos_list = []
-        for s_id, p in bot_engine.open_positions.items():
+        for s, p in bot_engine.open_positions.items():
             pnl_val = p.get('pnl', 0.0)
             pos_list.append({
-                "ACTIVO": s_id,
+                "ACTIVO": s,
                 "LADO": p['side'].upper(),
                 "CONTRATOS": f"{p['contracts']:.4f}",
                 "ENTRADA": f"${p['entry_price']:.4f}",
