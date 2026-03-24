@@ -6,15 +6,15 @@ from datetime import datetime
 import random
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="DreamBot Ultra Beneficio", layout="wide")
+st.set_page_config(page_title="DreamBot Ultra", layout="wide")
 
-# --- ESTILOS ---
+# --- ESTILOS CORREGIDOS ---
 st.markdown("""
     <style>
-    .main { background-color: #020C1B; color: white; }
-    .stMetric { background-color: #112240; padding: 15px; border-radius: 10px; border: 1px solid #64FFDA; }
+    .main { background-color: #020C1B; }
+    .stMetric { border: 1px solid #64FFDA; padding: 10px; border-radius: 5px; }
     </style>
-    """, unsafe_allow_index=True)
+    """, unsafe_allow_html=True)
 
 # --- CITAS BÍBLICAS ---
 BIBLE_QUOTES = [
@@ -24,8 +24,8 @@ BIBLE_QUOTES = [
     "Si puedes creer, al que cree todo le es posible. (Marcos 9:23)"
 ]
 
-# --- LÓGICA DE TRADING ---
-class UltraAutonomo:
+# --- CLASE DEL BOT AUTÓNOMO ---
+class DreamBotCloud:
     def __init__(self, api_key, secret):
         self.exchange = ccxt.krakenfutures({
             'apiKey': api_key,
@@ -34,30 +34,8 @@ class UltraAutonomo:
         })
         self.symbols = ['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD', 'XRP/USD:USD', 'ADA/USD:USD']
         self.leverage = 10
-        self.take_profit = 0.02  # 2% de movimiento de precio
-        self.stop_loss = 0.015   # 1.5% de protección
 
-    def gestionar_posiciones(self):
-        """Revisa posiciones abiertas y decide si cerrar"""
-        try:
-            posiciones = self.exchange.fetch_positions()
-            for pos in posiciones:
-                if pos['contracts'] > 0:
-                    pnl = float(pos['unrealizedPnl'] or 0)
-                    side = pos['side']
-                    symbol = pos['symbol']
-                    
-                    # Lógica de Cierre Automático (Take Profit / Stop Loss)
-                    # Si ya ganamos una cantidad razonable, cerramos para asegurar
-                    if pnl > (pos['initialMargin'] * 0.20): # Cerramos al 20% de ROI
-                        self.exchange.create_market_order(symbol, 'sell' if side == 'long' else 'buy', pos['contracts'], params={'reduceOnly': True})
-                        return f"💰 ¡Gloria a Dios! Cerramos {symbol} con GANANCIA."
-            return None
-        except Exception as e:
-            return f"Error gestión: {e}"
-
-    def ejecutar_estrategia(self, symbol):
-        """Analiza y abre órdenes"""
+    def obtener_datos(self, symbol):
         try:
             bars = self.exchange.fetch_ohlcv(symbol, timeframe='5m', limit=30)
             df = pd.DataFrame(bars, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
@@ -65,70 +43,90 @@ class UltraAutonomo:
             df['std'] = df['close'].rolling(window=20).std()
             df['lower'] = df['ma'] - (2 * df['std'])
             df['upper'] = df['ma'] + (2 * df['std'])
-            
-            last = df.iloc[-1]
-            precio = last['close']
-            
-            # --- GATILLO DE ENTRADA ---
-            if precio <= last['lower']:
-                # Abrir LONG
-                balance = self.exchange.fetch_total_balance()['USD']
-                cantidad = (balance * self.leverage * 0.9) / precio
-                self.exchange.create_market_order(symbol, 'buy', cantidad)
-                return f"🚀 LONG abierto en {symbol} a ${precio}"
-            
-            elif precio >= last['upper']:
-                # Abrir SHORT
-                balance = self.exchange.fetch_total_balance()['USD']
-                cantidad = (balance * self.leverage * 0.9) / precio
-                self.exchange.create_market_order(symbol, 'sell', cantidad)
-                return f"📉 SHORT abierto en {symbol} a ${precio}"
-                
+            return df
+        except:
             return None
-        except Exception as e:
-            return f"Error ejecución {symbol}: {e}"
 
-# --- INTERFAZ STREAMLIT ---
-st.title("💎 EL BOT DE ENSUEÑO: MODO ULTRA 24/7")
-st.subheader(random.choice(BIBLE_QUOTES))
-
-# Sidebar para credenciales
-with st.sidebar:
-    st.header("Configuración")
-    key = st.text_input("API Key", value="oB/wxeBt8...", type="password")
-    sec = st.text_input("API Secret", value="E4mIb/OLs...", type="password")
-    activado = st.toggle("🚀 ACTIVAR TRADING AUTÓNOMO")
-
-# Dashboard principal
-col1, col2 = st.columns(2)
-placeholder_balance = col1.empty()
-placeholder_estado = col2.empty()
-
-log_container = st.container()
-st.divider()
-tabla_container = st.empty()
-
-if activado:
-    bot = UltraAutonomo(key, sec)
-    while True:
+    def ejecutar_ciclo(self):
+        logs = []
         try:
-            # 1. Actualizar Balance
-            bal = bot.exchange.fetch_total_balance().get('USD', 5.91)
-            placeholder_balance.metric("Billetera (USD)", f"${bal:.2f}")
-            placeholder_estado.success("Bot Operando en la Nube")
+            # 1. Revisar balance real
+            balance = self.exchange.fetch_total_balance()
+            usd_actual = balance.get('USD', 0.0)
+            
+            # 2. Revisar posiciones abiertas para no duplicar
+            posiciones = self.exchange.fetch_positions()
+            pos_activas = [p['symbol'] for p in posiciones if float(p.get('contracts', 0)) > 0]
 
-            # 2. Gestionar Cierres
-            msg_cierre = bot.gestionar_posiciones()
-            if msg_cierre: st.toast(msg_cierre)
+            for s in self.symbols:
+                df = self.obtener_datos(s)
+                if df is None: continue
+                
+                last = df.iloc[-1]
+                precio = last['close']
+                
+                # LÓGICA DE ENTRADA (Si no hay posición abierta en este activo)
+                if s not in pos_activas:
+                    if precio <= last['lower']:
+                        # ENTRAR LONG
+                        qty = (usd_actual * self.leverage * 0.9) / precio
+                        self.exchange.create_market_order(s, 'buy', qty)
+                        logs.append(f"🟢 {s}: Orden LONG abierta a ${precio}")
+                    elif precio >= last['upper']:
+                        # ENTRAR SHORT
+                        qty = (usd_actual * self.leverage * 0.9) / precio
+                        self.exchange.create_market_order(s, 'sell', qty)
+                        logs.append(f"🔴 {s}: Orden SHORT abierta a ${precio}")
+                
+                # LÓGICA DE SALIDA (Si hay posición, revisar profit)
+                else:
+                    for p in posiciones:
+                        if p['symbol'] == s:
+                            pnl = float(p.get('unrealizedPnl', 0))
+                            # Cerramos si ganamos 15% del margen o perdemos 10%
+                            if pnl > (float(p['initialMargin']) * 0.15) or pnl < -(float(p['initialMargin']) * 0.10):
+                                side_cierre = 'sell' if p['side'] == 'long' else 'buy'
+                                self.exchange.create_market_order(s, side_cierre, p['contracts'], params={'reduceOnly': True})
+                                logs.append(f"💰 {s}: Posición cerrada. PNL: ${pnl}")
 
-            # 3. Escanear y Operar
-            for s in bot.symbols:
-                msg_trade = bot.ejecutar_estrategia(s)
-                if msg_trade: log_container.info(msg_trade)
-
-            time.sleep(15) # Pausa para evitar baneo de IP
+            return usd_actual, logs
         except Exception as e:
-            st.error(f"Fallo en el servidor: {e}")
-            time.sleep(30)
+            return 0, [f"❌ Error: {str(e)}"]
+
+# --- INTERFAZ DE USUARIO ---
+st.title("💎 EL BOT DE ENSUEÑO: ULTRA")
+st.write(f"_{random.choice(BIBLE_QUOTES)}_")
+
+# Configuración en el Sidebar
+with st.sidebar:
+    st.header("🔐 Credenciales")
+    api_key = st.text_input("API Key", type="password")
+    api_secret = st.text_input("API Secret", type="password")
+    run_bot = st.toggle("🚀 ACTIVAR TRADING")
+
+if run_bot and api_key and api_secret:
+    bot = DreamBotCloud(api_key, api_secret)
+    
+    # Contenedores para actualizar datos
+    col1, col2 = st.columns(2)
+    with col1:
+        metrica_balance = st.empty()
+    with col2:
+        metrica_tiempo = st.empty()
+        
+    log_box = st.expander("Ver Monitor de Actividad", expanded=True)
+    
+    # Bucle de refresco (Streamlit refresca la página para simular 24/7)
+    while True:
+        saldo, mensajes = bot.ejecutar_ciclo()
+        
+        metrica_balance.metric("Saldo en Kraken Futures", f"${saldo:.2f} USD")
+        metrica_tiempo.text(f"Última actualización: {datetime.now().strftime('%H:%M:%S')}")
+        
+        for msg in mensajes:
+            log_box.write(msg)
+            
+        time.sleep(30) # Espera 30 segundos entre escaneos
+        st.rerun() # Reinicia la app para actualizar datos
 else:
-    st.warning("El bot está en modo pausa. Activa el switch en la barra lateral.")
+    st.info("Ingresa tus llaves y activa el switch para comenzar a operar.")
