@@ -2,370 +2,133 @@ import streamlit as st
 import ccxt
 import pandas as pd
 import time
-import threading
 from datetime import datetime
 import random
-from collections import defaultdict
 
-# Configuración de la página
-st.set_page_config(
-    page_title="💎 El Bot de Ensueño Ultra 💎",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="DreamBot Ultra Beneficio", layout="wide")
 
-# MAPA GLOBAL DE SÍMBOLOS (Fuera de la clase para evitar errores de caché)
-SYMBOL_MAP = {
-    'SOL/USD:USD': 'PI_SOLUSD',
-    'BTC/USD:USD': 'PI_XBTUSD',
-    'ETH/USD:USD': 'PI_ETHUSD',
-    'XRP/USD:USD': 'PI_XRPUSD',
-    'ADA/USD:USD': 'PI_ADAUSD',
-    'LINK/USD:USD': 'PI_LINKUSD',
-    'DOT/USD:USD': 'PI_DOTUSD',
-    'AVAX/USD:USD': 'PI_AVAXUSD'
-}
-REVERSE_MAP = {v: k for k, v in SYMBOL_MAP.items()}
-
-# CSS personalizado
+# --- ESTILOS ---
 st.markdown("""
     <style>
-        body {
-            background-color: #020C1B;
-            color: #CCD6F6;
-        }
-        .main {
-            background-color: #020C1B;
-        }
-        .stButton > button {
-            background-color: #10B981;
-            color: white;
-            font-weight: bold;
-            border-radius: 8px;
-            padding: 10px 20px;
-        }
-        .stButton > button:hover {
-            background-color: #059669;
-        }
+    .main { background-color: #020C1B; color: white; }
+    .stMetric { background-color: #112240; padding: 15px; border-radius: 10px; border: 1px solid #64FFDA; }
     </style>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_index=True)
 
-# Citas Bíblicas
+# --- CITAS BÍBLICAS ---
 BIBLE_QUOTES = [
     "Encomienda al SEÑOR tu camino, confía en él, y él hará. (Salmo 37:5)",
     "Todo lo puedo en Cristo que me fortalece. (Filipenses 4:13)",
-    "El SEÑOR es mi pastor; nada me faltará. (Salmo 23:1)",
-    "Mira que te mando que te esfuerces y seas valiente. (Josué 1:9)",
-    "Pedid, y se os dará; buscad, y hallaréis. (Mateo 7:7)",
     "La bendición del SEÑOR es la que enriquece. (Proverbios 10:22)",
-    "Porque yo sé los pensamientos que tengo acerca de vosotros, dice Jehová. (Jeremías 29:11)",
-    "El que confía en el SEÑOR prosperará. (Proverbios 28:25)",
-    "No te afanes por el día de mañana. (Mateo 6:34)",
-    "Si puedes creer, al que cree todo le es posible. (Marcos 9:23)",
-    "Bienaventurado el hombre que confía en el SEÑOR. (Proverbios 16:20)",
-    "Deléitate asimismo en Jehová, y él te concederá los deseos de tu corazón. (Salmo 37:4)"
+    "Si puedes creer, al que cree todo le es posible. (Marcos 9:23)"
 ]
 
-# Inicializar sesión
-if 'running' not in st.session_state:
-    st.session_state.running = False
-if 'log_messages' not in st.session_state:
-    st.session_state.log_messages = []
-if 'current_quote' not in st.session_state:
-    st.session_state.current_quote = random.choice(BIBLE_QUOTES)
-if 'last_quote_time' not in st.session_state:
-    st.session_state.last_quote_time = time.time()
+# --- LÓGICA DE TRADING ---
+class UltraAutonomo:
+    def __init__(self, api_key, secret):
+        self.exchange = ccxt.krakenfutures({
+            'apiKey': api_key,
+            'secret': secret,
+            'enableRateLimit': True,
+        })
+        self.symbols = ['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD', 'XRP/USD:USD', 'ADA/USD:USD']
+        self.leverage = 10
+        self.take_profit = 0.02  # 2% de movimiento de precio
+        self.stop_loss = 0.015   # 1.5% de protección
 
-class BotEngine:
-    def __init__(self):
-        self.running = False
-        self.exchange = None
-        self.log_messages = []
-        self.open_positions = {}
-        self.last_quote_time = time.time()
-        
-    def log(self, message):
-        ts = datetime.now().strftime("%H:%M:%S")
-        msg = f"[{ts}] {message}"
-        self.log_messages.append(msg)
-        if len(self.log_messages) > 100:
-            self.log_messages.pop(0)
-    
-    def initialize_exchange(self, api_key, api_secret):
+    def gestionar_posiciones(self):
+        """Revisa posiciones abiertas y decide si cerrar"""
         try:
-            self.exchange = ccxt.krakenfutures({
-                'apiKey': api_key,
-                'secret': api_secret,
-                'enableRateLimit': True,
-            })
-            self.log("✅ Conexión con Kraken Futures establecida.")
-            return True
+            posiciones = self.exchange.fetch_positions()
+            for pos in posiciones:
+                if pos['contracts'] > 0:
+                    pnl = float(pos['unrealizedPnl'] or 0)
+                    side = pos['side']
+                    symbol = pos['symbol']
+                    
+                    # Lógica de Cierre Automático (Take Profit / Stop Loss)
+                    # Si ya ganamos una cantidad razonable, cerramos para asegurar
+                    if pnl > (pos['initialMargin'] * 0.20): # Cerramos al 20% de ROI
+                        self.exchange.create_market_order(symbol, 'sell' if side == 'long' else 'buy', pos['contracts'], params={'reduceOnly': True})
+                        return f"💰 ¡Gloria a Dios! Cerramos {symbol} con GANANCIA."
+            return None
         except Exception as e:
-            self.log(f"❌ Error de conexión: {str(e)}")
-            return False
-    
-    def audit_open_positions(self):
+            return f"Error gestión: {e}"
+
+    def ejecutar_estrategia(self, symbol):
+        """Analiza y abre órdenes"""
         try:
-            if not self.exchange:
-                return
+            bars = self.exchange.fetch_ohlcv(symbol, timeframe='5m', limit=30)
+            df = pd.DataFrame(bars, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+            df['ma'] = df['close'].rolling(window=20).mean()
+            df['std'] = df['close'].rolling(window=20).std()
+            df['lower'] = df['ma'] - (2 * df['std'])
+            df['upper'] = df['ma'] + (2 * df['std'])
             
-            positions = self.exchange.fetch_positions()
-            self.log("🔍 Auditando posiciones abiertas...")
-            self.open_positions = {} # Limpiar antes de auditar
+            last = df.iloc[-1]
+            precio = last['close']
             
-            for pos in positions:
-                contracts = float(pos.get('contracts', 0))
-                if contracts != 0:
-                    symbol_id = pos.get('symbol', 'Unknown')
-                    # Normalizar nombre usando el mapa global
-                    normalized_symbol = REVERSE_MAP.get(symbol_id, symbol_id)
-                    
-                    info = pos.get('info', {})
-                    entry_price = float(pos.get('entryPrice', 0) or 
-                                      pos.get('avgEntryPrice', 0) or 
-                                      info.get('entryPrice', 0) or 
-                                      info.get('price', 0) or 0)
-                    
-                    side = pos.get('side', 'long').lower()
-                    
-                    self.open_positions[normalized_symbol] = {
-                        'contracts': abs(contracts),
-                        'entry_price': entry_price,
-                        'current_price': 0.0,
-                        'side': side,
-                        'pnl': 0.0,
-                        'kraken_id': symbol_id
-                    }
-                    self.log(f"📍 Posición: {normalized_symbol} | {side.upper()} | Entrada: ${entry_price:.4f}")
+            # --- GATILLO DE ENTRADA ---
+            if precio <= last['lower']:
+                # Abrir LONG
+                balance = self.exchange.fetch_total_balance()['USD']
+                cantidad = (balance * self.leverage * 0.9) / precio
+                self.exchange.create_market_order(symbol, 'buy', cantidad)
+                return f"🚀 LONG abierto en {symbol} a ${precio}"
             
-            if not self.open_positions:
-                self.log("✅ No hay posiciones abiertas.")
+            elif precio >= last['upper']:
+                # Abrir SHORT
+                balance = self.exchange.fetch_total_balance()['USD']
+                cantidad = (balance * self.leverage * 0.9) / precio
+                self.exchange.create_market_order(symbol, 'sell', cantidad)
+                return f"📉 SHORT abierto en {symbol} a ${precio}"
+                
+            return None
         except Exception as e:
-            self.log(f"⚠️ Error en auditoría: {str(e)}")
-    
-    def get_balance(self):
-        try:
-            if not self.exchange:
-                return 0.0
-            balance = self.exchange.fetch_total_balance()
-            return float(balance.get('USD', 0.0))
-        except:
-            return 0.0
-    
-    def check_and_close_positions(self):
-        try:
-            if not self.exchange or not self.open_positions:
-                return
-            
-            for symbol in list(self.open_positions.keys()):
-                pos = self.open_positions[symbol]
-                kraken_id = pos.get('kraken_id', symbol)
-                
-                try:
-                    ticker = self.exchange.fetch_ticker(kraken_id)
-                    precio_actual = float(ticker['last'])
-                    pos['current_price'] = precio_actual
-                except Exception as e:
-                    self.log(f"⚠️ No se pudo obtener precio para {symbol}: {str(e)}")
-                    continue
-                
-                if pos['entry_price'] > 0 and precio_actual > 0:
-                    if pos['side'] == 'long':
-                        pos['pnl'] = ((precio_actual - pos['entry_price']) / pos['entry_price']) * 100
-                    else: # short
-                        pos['pnl'] = ((pos['entry_price'] - precio_actual) / pos['entry_price']) * 100
-                
-                try:
-                    bars = self.exchange.fetch_ohlcv(kraken_id, timeframe='5m', limit=50)
-                    df = pd.DataFrame(bars, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-                    df['ma'] = df['close'].rolling(window=20).mean()
-                    df['std'] = df['close'].rolling(window=20).std()
-                    df['upper'] = df['ma'] + (2 * df['std'])
-                    df['lower'] = df['ma'] - (2 * df['std'])
-                    
-                    last = df.iloc[-1]
-                    
-                    should_close = False
-                    reason = ""
-                    
-                    if pos['side'] == 'long':
-                        if precio_actual >= last['upper']:
-                            should_close = True
-                            reason = "TP (Banda Superior)"
-                        elif precio_actual < pos['entry_price'] * 0.95:
-                            should_close = True
-                            reason = "Stop Loss (5%)"
-                    elif pos['side'] == 'short':
-                        if precio_actual <= last['lower']:
-                            should_close = True
-                            reason = "TP (Banda Inferior)"
-                        elif precio_actual > pos['entry_price'] * 1.05:
-                            should_close = True
-                            reason = "Stop Loss (5%)"
-                    
-                    if should_close:
-                        try:
-                            if pos['side'] == 'long':
-                                self.exchange.create_market_sell_order(kraken_id, pos['contracts'])
-                            else:
-                                self.exchange.create_market_buy_order(kraken_id, pos['contracts'])
-                            self.log(f"✅ CERRADA: {symbol} | {reason} | PnL: {pos['pnl']:.2f}%")
-                            del self.open_positions[symbol]
-                        except Exception as e:
-                            self.log(f"❌ Error cerrando {symbol}: {str(e)}")
-                except:
-                    continue
-        except Exception as e:
-            self.log(f"⚠️ Error en gestión de cierre: {str(e)}")
-    
-    def scan_and_trade(self, symbols, base_leverage, max_leverage, investment, real_mode):
-        try:
-            if not self.exchange: return []
-            balance = self.get_balance()
-            if balance <= 0:
-                self.log(f"⚠️ SALDO 0. Pausado.")
-                return []
-            
-            scan_data = []
-            for symbol in symbols:
-                try:
-                    # Usamos el ID de Kraken para pedir los datos OHLCV
-                    kraken_id = SYMBOL_MAP.get(symbol, symbol)
-                    bars = self.exchange.fetch_ohlcv(kraken_id, timeframe='5m', limit=50)
-                    df = pd.DataFrame(bars, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-                    df['ma'] = df['close'].rolling(window=20).mean()
-                    df['std'] = df['close'].rolling(window=20).std()
-                    df['upper'] = df['ma'] + (2 * df['std'])
-                    df['lower'] = df['ma'] - (2 * df['std'])
-                    
-                    last = df.iloc[-1]
-                    precio = float(last['close'])
-                    dist_inf = ((precio - last['lower']) / last['lower']) * 100
-                    dist_sup = ((last['upper'] - precio) / precio) * 100
-                    
-                    signal, prox, lev = "ESPERANDO...", 0.0, base_leverage
-                    
-                    if precio <= last['lower']:
-                        signal, prox = "🟢 LONG", 0.0
-                        lev = min(max_leverage, int(base_leverage + (abs(precio - last['lower'])/last['lower'] * 1000)))
-                        if symbol not in self.open_positions:
-                            if real_mode:
-                                try:
-                                    amt = investment / precio
-                                    self.exchange.create_market_buy_order(kraken_id, amt, {'leverage': lev})
-                                    self.open_positions[symbol] = {'contracts': amt, 'entry_price': precio, 'side': 'long', 'pnl': 0.0, 'kraken_id': kraken_id}
-                                    self.log(f"🚀 ORDEN REAL ENVIADA: LONG {symbol} {lev}x")
-                                except Exception as e:
-                                    self.log(f"❌ Error al abrir LONG {symbol}: {str(e)}")
-                            else:
-                                self.log(f"🔔 SEÑAL DETECTADA: LONG {symbol} (Modo Real APAGADO)")
-                    elif precio >= last['upper']:
-                        signal, prox = "🔴 SHORT", 0.0
-                        lev = min(max_leverage, int(base_leverage + (abs(precio - last['upper'])/last['upper'] * 1000)))
-                        if symbol not in self.open_positions:
-                            if real_mode:
-                                try:
-                                    amt = investment / precio
-                                    self.exchange.create_market_sell_order(kraken_id, amt, {'leverage': lev})
-                                    self.open_positions[symbol] = {'contracts': amt, 'entry_price': precio, 'side': 'short', 'pnl': 0.0, 'kraken_id': kraken_id}
-                                    self.log(f"🚀 ORDEN REAL ENVIADA: SHORT {symbol} {lev}x")
-                                except Exception as e:
-                                    self.log(f"❌ Error al abrir SHORT {symbol}: {str(e)}")
-                            else:
-                                self.log(f"🔔 SEÑAL DETECTADA: SHORT {symbol} (Modo Real APAGADO)")
-                    else:
-                        if dist_inf < dist_sup: signal, prox = "📍 CERCA LONG", dist_inf
-                        else: signal, prox = "📍 CERCA SHORT", dist_sup
-                        if prox < 0.1: lev = 25
-                    
-                    scan_data.append({"ACTIVO": symbol, "PRECIO": f"${precio:.2f}", "ESTADO": signal, "FALTA %": f"{prox:.3f}%", "LEV": f"{lev}x"})
-                except Exception as e:
-                    self.log(f"⚠️ Error escaneando {symbol}: {str(e)}")
-                    continue
-            return scan_data
-        except: return []
+            return f"Error ejecución {symbol}: {e}"
 
-@st.cache_resource
-def get_bot_engine():
-    return BotEngine()
+# --- INTERFAZ STREAMLIT ---
+st.title("💎 EL BOT DE ENSUEÑO: MODO ULTRA 24/7")
+st.subheader(random.choice(BIBLE_QUOTES))
 
-bot_engine = get_bot_engine()
-
-# Header
-st.markdown("# 🌟 EL BOT DE ENSUEÑO: ULTRA BENEFICIO 🌟")
-st.markdown(f"### ✨ *{st.session_state.current_quote}*")
-
-# Sidebar
+# Sidebar para credenciales
 with st.sidebar:
-    st.markdown("## ⚙️ CONFIGURACIÓN")
-    api_key = st.text_input("API Key", type="password")
-    api_secret = st.text_input("API Secret", type="password")
-    base_lev = st.slider("Lev Base", 5, 20, 10)
-    max_lev = st.slider("Lev Max", 25, 50, 50)
-    inv = st.number_input("Inversión (USD)", min_value=5.0, value=10.0)
-    real_mode = st.checkbox("TRADING REAL")
-    
-    # Símbolos para escaneo (usando el mapa global)
-    symbols_to_scan = st.multiselect("Activos", list(SYMBOL_MAP.keys()), default=['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD'])
-    
-    st.divider()
-    if st.button("🧹 LIMPIAR MEMORIA DEL BOT"):
-        st.cache_resource.clear()
-        st.rerun()
+    st.header("Configuración")
+    key = st.text_input("API Key", value="oB/wxeBt8...", type="password")
+    sec = st.text_input("API Secret", value="E4mIb/OLs...", type="password")
+    activado = st.toggle("🚀 ACTIVAR TRADING AUTÓNOMO")
 
-# Métricas
-c1, c2, c3 = st.columns(3)
-c1.metric("ESTADO", "🟢 CORRIENDO" if st.session_state.running else "🔴 DETENIDO")
-c2.metric("BILLETERA", f"${bot_engine.get_balance():.2f}")
-c3.metric("POSICIONES", len(bot_engine.open_positions))
+# Dashboard principal
+col1, col2 = st.columns(2)
+placeholder_balance = col1.empty()
+placeholder_estado = col2.empty()
 
-# Controles
-cb1, cb2 = st.columns(2)
-if cb1.button("🚀 INICIAR", use_container_width=True):
-    if api_key and api_secret:
-        if bot_engine.initialize_exchange(api_key, api_secret):
-            bot_engine.audit_open_positions()
-            st.session_state.running = True
-            st.rerun()
-if cb2.button("🛑 DETENER", use_container_width=True):
-    st.session_state.running = False
-    st.rerun()
-
+log_container = st.container()
 st.divider()
+tabla_container = st.empty()
 
-# Tablas
-if st.session_state.running:
-    # Primero gestionamos posiciones para actualizar PnL
-    bot_engine.check_and_close_positions()
-    # Luego escaneamos nuevas oportunidades
-    res = bot_engine.scan_and_trade(symbols_to_scan, base_lev, max_lev, inv, real_mode)
-    
-    if res: st.table(pd.DataFrame(res))
-    
-    if bot_engine.open_positions:
-        st.markdown("### 📍 POSICIONES ABIERTAS")
-        pos_list = []
-        for s, p in bot_engine.open_positions.items():
-            pnl_val = p.get('pnl', 0.0)
-            pos_list.append({
-                "ACTIVO": s,
-                "LADO": p['side'].upper(),
-                "CONTRATOS": f"{p['contracts']:.4f}",
-                "ENTRADA": f"${p['entry_price']:.4f}",
-                "PRECIO ACTUAL": f"${p['current_price']:.4f}",
-                "PnL %": f"{pnl_val:.2f}%"
-            })
-        st.table(pd.DataFrame(pos_list))
-    
-    # Actualizar cita
-    if time.time() - st.session_state.last_quote_time > 60:
-        st.session_state.current_quote = random.choice(BIBLE_QUOTES)
-        st.session_state.last_quote_time = time.time()
-    
-    time.sleep(5)
-    st.rerun()
+if activado:
+    bot = UltraAutonomo(key, sec)
+    while True:
+        try:
+            # 1. Actualizar Balance
+            bal = bot.exchange.fetch_total_balance().get('USD', 5.91)
+            placeholder_balance.metric("Billetera (USD)", f"${bal:.2f}")
+            placeholder_estado.success("Bot Operando en la Nube")
 
-st.divider()
-st.markdown("## 📋 LOG")
-for m in bot_engine.log_messages[-20:]: st.text(m)
+            # 2. Gestionar Cierres
+            msg_cierre = bot.gestionar_posiciones()
+            if msg_cierre: st.toast(msg_cierre)
+
+            # 3. Escanear y Operar
+            for s in bot.symbols:
+                msg_trade = bot.ejecutar_estrategia(s)
+                if msg_trade: log_container.info(msg_trade)
+
+            time.sleep(15) # Pausa para evitar baneo de IP
+        except Exception as e:
+            st.error(f"Fallo en el servidor: {e}")
+            time.sleep(30)
+else:
+    st.warning("El bot está en modo pausa. Activa el switch en la barra lateral.")
