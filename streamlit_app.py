@@ -103,29 +103,25 @@ class BotEngine:
             
             for pos in positions:
                 contracts = float(pos.get('contracts', 0))
-                if contracts != 0: # Puede ser negativo en algunos exchanges, Kraken usa side
+                if contracts != 0:
                     symbol = pos.get('symbol', 'Unknown')
                     # Kraken Futures usa entryPrice para el precio de apertura
                     entry_price = float(pos.get('entryPrice', 0) or pos.get('contractSize', 0) or 0)
+                    # Si el entryPrice es 0, intentamos obtenerlo de otra forma
+                    if entry_price == 0:
+                        entry_price = float(pos.get('avgEntryPrice', 0) or 0)
+                    
                     current_price = float(pos.get('markPrice', 0) or 0)
                     side = pos.get('side', 'long').lower()
-                    
-                    # Cálculo manual de PnL % para mayor precisión
-                    pnl_pct = 0.0
-                    if entry_price > 0 and current_price > 0:
-                        if side == 'long':
-                            pnl_pct = ((current_price - entry_price) / entry_price) * 100
-                        else: # short
-                            pnl_pct = ((entry_price - current_price) / entry_price) * 100
                     
                     self.open_positions[symbol] = {
                         'contracts': abs(contracts),
                         'entry_price': entry_price,
                         'current_price': current_price,
                         'side': side,
-                        'pnl': pnl_pct
+                        'pnl': 0.0 # Se calculará dinámicamente
                     }
-                    self.log(f"📍 Posición encontrada: {symbol} | {side.upper()} | PnL: {pnl_pct:.2f}%")
+                    self.log(f"📍 Posición encontrada: {symbol} | {side.upper()} | Entrada: ${entry_price:.4f}")
             
             if not self.open_positions:
                 self.log("✅ No hay posiciones abiertas.")
@@ -148,23 +144,28 @@ class BotEngine:
             
             for symbol in list(self.open_positions.keys()):
                 pos = self.open_positions[symbol]
+                
+                # Obtener precio actual real (Ticker) para mayor precisión en PnL
+                ticker = self.exchange.fetch_ticker(symbol)
+                precio_actual = float(ticker['last'])
+                pos['current_price'] = precio_actual
+                
+                # Cálculo manual de PnL %
+                if pos['entry_price'] > 0:
+                    if pos['side'] == 'long':
+                        pos['pnl'] = ((precio_actual - pos['entry_price']) / pos['entry_price']) * 100
+                    else: # short
+                        pos['pnl'] = ((pos['entry_price'] - precio_actual) / pos['entry_price']) * 100
+                
+                # Obtener Bandas de Bollinger para decisión de cierre
                 bars = self.exchange.fetch_ohlcv(symbol, timeframe='5m', limit=50)
                 df = pd.DataFrame(bars, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-                
                 df['ma'] = df['close'].rolling(window=20).mean()
                 df['std'] = df['close'].rolling(window=20).std()
                 df['upper'] = df['ma'] + (2 * df['std'])
                 df['lower'] = df['ma'] - (2 * df['std'])
                 
                 last = df.iloc[-1]
-                precio_actual = float(last['close'])
-                
-                # Actualizar PnL en tiempo real para la tabla
-                if pos['entry_price'] > 0:
-                    if pos['side'] == 'long':
-                        pos['pnl'] = ((precio_actual - pos['entry_price']) / pos['entry_price']) * 100
-                    else:
-                        pos['pnl'] = ((pos['entry_price'] - precio_actual) / pos['entry_price']) * 100
                 
                 should_close = False
                 reason = ""
@@ -291,8 +292,11 @@ st.divider()
 
 # Tablas
 if st.session_state.running:
-    res = bot_engine.scan_and_trade(symbols, base_lev, max_lev, inv, real_mode)
+    # Primero gestionamos posiciones para actualizar PnL
     bot_engine.check_and_close_positions()
+    # Luego escaneamos nuevas oportunidades
+    res = bot_engine.scan_and_trade(symbols, base_lev, max_lev, inv, real_mode)
+    
     if res: st.table(pd.DataFrame(res))
     
     if bot_engine.open_positions:
@@ -300,13 +304,12 @@ if st.session_state.running:
         pos_list = []
         for s, p in bot_engine.open_positions.items():
             pnl_val = p.get('pnl', 0.0)
-            color = "green" if pnl_val >= 0 else "red"
-            
             pos_list.append({
                 "ACTIVO": s,
                 "LADO": p['side'].upper(),
                 "CONTRATOS": f"{p['contracts']:.4f}",
-                "ENTRADA": f"${p['entry_price']:.2f}",
+                "ENTRADA": f"${p['entry_price']:.4f}",
+                "PRECIO ACTUAL": f"${p['current_price']:.4f}",
                 "PnL %": f"{pnl_val:.2f}%"
             })
         st.table(pd.DataFrame(pos_list))
