@@ -17,10 +17,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # PARÁMETROS DE ELITE
-APALANCAMIENTO = 25    # 25x nos da seguridad de un 4% de movimiento antes de riesgo real
-TP_TARGET = 0.75       # Cosechamos al 0.75% (Casi 20% ROI real)
-SL_EMERGENCIA = -2.0   # Si cae 2%, salvamos los $10. Prohibido volver a 0.
-MAX_BALAS = 2          # Solo 2 monedas a la vez para cuidar el margen
+APALANCAMIENTO = 25    
+TP_TARGET = 0.75       
+SL_EMERGENCIA = -2.0   # Este es el valor que faltaba conectar
+MAX_BALAS = 2          
 
 def safe_float(val):
     try: return float(val) if val is not None else 0.0
@@ -28,20 +28,17 @@ def safe_float(val):
 
 def calc_indicators(df):
     c = df['c'].astype(float)
-    # RSI Blindado
     diff = c.diff()
-    gain = diff.clip(lower=0).ewm(span=14).mean()
-    loss = (-diff).clip(lower=0).ewm(span=14).mean()
+    gain = diff.clip(lower=0).ewm(span=14, adjust=False).mean()
+    loss = (-diff).clip(lower=0).ewm(span=14, adjust=False).mean()
     df['rsi'] = 100 - (100 / (1 + (gain / (loss + 1e-10))))
-    # Filtro de Tendencia (Media Móvil de 50)
     df['ma50'] = c.rolling(50).mean()
-    # Volatilidad (Bollinger)
     df['std'] = c.rolling(20).std()
     df['bb_low'] = c.rolling(20).mean() - (2 * df['std'])
     return df
 
 st.title("💎 PROYECTO GENESIS: CAMINO A LOS $3000")
-st.write("_'No temas, porque yo estoy contigo; no desmayes, porque yo soy tu Dios...' (Isaías 41:10)_")
+st.write("_'No temas, porque yo estoy contigo...' (Isaías 41:10)_")
 
 with st.sidebar:
     st.header("🔐 Acceso")
@@ -68,7 +65,7 @@ if activar and api_key and api_secret:
             ph_cap.metric("Capital de Batalla", f"${equity:.4f} USD")
             ph_meta.metric("Meta Final", "$3,000.00 USD")
 
-            # 2. GESTIÓN DE POSICIONES (TP Y SL)
+            # 2. GESTIÓN DE POSICIONES
             posiciones = exchange.fetch_positions()
             n_activas = 0
             for p in posiciones:
@@ -77,19 +74,19 @@ if activar and api_key and api_secret:
                     n_activas += 1
                     sym, side = p['symbol'], p['side'].upper()
                     entry, mark, pnl = safe_float(p['entryPrice']), safe_float(p['markPrice']), safe_float(p['unrealizedPnl'])
-                    move = ((mark - entry) / entry * 100) if side == 'LONG' else ((entry - mark) / entry * 100)
+                    move = ((mark - entry) / (entry if entry > 0 else 1) * 100) if side == 'LONG' else ((entry - mark) / (entry if entry > 0 else 1) * 100)
                     
-                    # CIERRE POR GANANCIA (TP)
+                    # CIERRE POR GANANCIA
                     if move >= TP_TARGET:
                         exchange.create_market_order(sym, 'sell' if side == 'LONG' else 'buy', qty, params={'reduceOnly': True})
                         log.success(f"✅ GANANCIA: +${pnl:.2f} en {sym}")
                     
-                    # CIERRE POR PROTECCIÓN (SL)
-                    elif move <= SL_PROTECCION:
+                    # CIERRE POR PROTECCIÓN (Corregido: SL_EMERGENCIA)
+                    elif move <= SL_EMERGENCIA:
                         exchange.create_market_order(sym, 'sell' if side == 'LONG' else 'buy', qty, params={'reduceOnly': True})
-                        log.error(f"🛡️ ESCUDO: Salvamos capital en {sym} (-$0.50 aprox)")
+                        log.error(f"🛡️ ESCUDO: Salvamos capital en {sym}")
 
-            # 3. DISPARO FRANCOTIRADOR (Solo entradas confirmadas)
+            # 3. DISPARO FRANCOTIRADOR
             if n_activas < MAX_BALAS:
                 for sym in ['SOL/USD:USD', 'BTC/USD:USD', 'ETH/USD:USD', 'XRP/USD:USD']:
                     try:
@@ -97,10 +94,6 @@ if activar and api_key and api_secret:
                         df = calc_indicators(pd.DataFrame(bars, columns=['ts', 'o', 'h', 'l', 'c', 'v']))
                         last = df.iloc[-1]
                         
-                        # LA ENTRADA PERFECTA:
-                        # 1. Precio toca banda baja
-                        # 2. RSI está en zona de rebote (<35)
-                        # 3. El precio está cerca de su media (No estamos en caída libre)
                         if last['c'] <= last['bb_low'] and last['rsi'] < 35:
                             qty_buy = ((equity / 2) * APALANCAMIENTO) / last['c']
                             exchange.create_market_order(sym, 'buy', round(qty_buy, 1 if 'SOL' in sym else 0))
@@ -113,3 +106,4 @@ if activar and api_key and api_secret:
     except Exception as e:
         st.error(f"Reconectando... {e}")
         time.sleep(10)
+        st.rerun()
