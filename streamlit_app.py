@@ -1,71 +1,37 @@
-"""
-╔══════════════════════════════════════════════════════════════════╗
-║          SNIPER V6.1 PRO - SMART MONEY ELITE (CORREGIDO)         ║
-║          Estrategias: Ruptura, FVG, OB, Estructura de Mercado    ║
-╚══════════════════════════════════════════════════════════════════╝
-
-MEJORAS V6.1 PRO:
-1. Corrección de Errores: Eliminadas referencias a 'MarketStructure.BE' y 'entry_price'.
-2. Persistencia Robusta: Uso de archivo JSON para niveles de SL/TP y estadísticas.
-3. Lógica Smart Money: Detección mejorada de Estructura, OB y FVG.
-4. Interfaz Elite: Visualización clara de señales y estado de cuenta.
-"""
-
 import streamlit as st
 import ccxt
 import pandas as pd
 import numpy as np
 import time
+from datetime import datetime, timezone, date
 import json
 import os
-from datetime import datetime
 
 # ══════════════════════════════════════════
-# CONFIGURACIÓN Y PERSISTENCIA
+# SNIPER V6.0 - ULTIMATE PRICE ACTION WARRIOR
+# Estrategias: Liquidity Sweep, Breaker Block, FVG, OB, BOS/CHoCH, PD Array, Displacement
 # ══════════════════════════════════════════
-st.set_page_config(page_title="SNIPER V6.1 PRO | Smart Money Elite", layout="wide")
 
-DATA_FILE = "sniper_v6_data.json"
+st.set_page_config(page_title="SNIPER V6.0", layout="wide", initial_sidebar_state="expanded")
 
-def load_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, 'r') as f: return json.load(f)
-        except: pass
-    return {'active_trades': {}, 'stats': {'wins': 0, 'losses': 0, 'total_pnl': 0.0}}
-
-def save_data(data):
-    with open(DATA_FILE, 'w') as f: json.dump(data, f)
-
-if 'db' not in st.session_state:
-    st.session_state.db = load_data()
-
-# CSS Personalizado
 st.markdown("""
-<style>
-    .stApp { background-color: #0a0e1a; color: #e0e6f0; }
-    .metric-card { 
-        background: linear-gradient(135deg, #0f1629 0%, #1a2040 100%);
-        border: 1px solid #2a3a6a;
-        border-radius: 12px; padding: 16px; margin: 8px 0;
-    }
-    .signal-long { color: #00ff88; font-weight: bold; }
-    .signal-short { color: #ff4466; font-weight: bold; }
-    .score-badge { background: #4a9eff; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; }
-    h1 { color: #4a9eff !important; }
-</style>
+
 """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════
-# PARÁMETROS
+# PARÁMETROS OPTIMIZADOS V6.0
 # ══════════════════════════════════════════
-SYMBOLS = ['BTC/USD:USD', 'ETH/USD:USD', 'SOL/USD:USD', 'XRP/USD:USD', 'DOGE/USD:USD']
+SYMBOLS = ['BTC/USD:USD', 'ETH/USD:USD', 'SOL/USD:USD']
 LEVERAGE = 10
 RISK_PCT = 0.02
-RR_RATIO = 2.0
+RR_RATIO = 2.5
 MAX_POSITIONS = 2
+MAX_DAILY_LOSS_PCT = 0.04
+PARTIAL_PCT = 0.5
+TRAILING_TRIGGER_R = 1.0
 TIMEFRAME_ENTRY = '15m'
 TIMEFRAME_TREND = '1h'
+BARS_LIMIT = 400
 
 # ══════════════════════════════════════════
 # UTILIDADES
@@ -78,223 +44,387 @@ def log(msg, level="INFO"):
     now = datetime.now().strftime("%H:%M:%S")
     icons = {"INFO": "ℹ️", "TRADE": "🚀", "WIN": "💰", "LOSS": "🛡️", "WARN": "⚠️", "ERROR": "❌", "SCAN": "🔍"}
     icon = icons.get(level, "•")
-    if 'trade_log' not in st.session_state: st.session_state.trade_log = []
+    if 'trade_log' not in st.session_state:
+        st.session_state.trade_log = []
     st.session_state.trade_log.insert(0, f"[{now}] {icon} {msg}")
-    st.session_state.trade_log = st.session_state.trade_log[:100]
+    st.session_state.trade_log = st.session_state.trade_log[:150]
 
 # ══════════════════════════════════════════
-# MOTOR DE ANÁLISIS TÉCNICO
+# NUEVAS FUNCIONES DE PRICE ACTION V6.0
 # ══════════════════════════════════════════
-
 def calcular_indicadores(df):
-    c, h, l, o = df['c'].astype(float), df['h'].astype(float), df['l'].astype(float), df['o'].astype(float)
-    df['ema20']  = c.ewm(span=20,  adjust=False).mean()
-    df['ema50']  = c.ewm(span=50,  adjust=False).mean()
+    c = df['c'].astype(float)
+    h = df['h'].astype(float)
+    l = df['l'].astype(float)
+    o = df['o'].astype(float)
+    v = df['v'].astype(float)
+    
+    df['ema20'] = c.ewm(span=20, adjust=False).mean()
+    df['ema50'] = c.ewm(span=50, adjust=False).mean()
     df['ema200'] = c.ewm(span=200, adjust=False).mean()
-    tr1, tr2, tr3 = h - l, abs(h - c.shift(1)), abs(l - c.shift(1))
-    df['atr'] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1).rolling(14).mean()
-    df['vol_ma'] = df['v'].astype(float).rolling(20).mean()
-    df['vol_ratio'] = df['v'].astype(float) / df['vol_ma']
+    
+    tr = pd.concat([h-l, abs(h-c.shift()), abs(l-c.shift())], axis=1).max(axis=1)
+    df['atr'] = tr.rolling(14).mean()
+    
+    delta = c.diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
+    rs = gain / loss.replace(0, np.nan)
+    df['rsi'] = 100 - (100 / (1 + rs))
+    
+    df['vol_ma'] = v.rolling(20).mean()
+    df['vol_ratio'] = v / df['vol_ma']
+    df['body'] = abs(c - o)
+    df['is_bullish'] = c > o
     return df
 
-def detectar_estructura(df):
-    highs, lows = df['h'].astype(float).values, df['l'].astype(float).values
-    sw_h, sw_l = [], []
-    for i in range(3, len(df)-1):
-        if highs[i] == max(highs[max(0,i-3):i+2]): sw_h.append(highs[i])
-        if lows[i] == min(lows[max(0,i-3):i+2]): sw_l.append(lows[i])
-    if len(sw_h) < 2 or len(sw_l) < 2: return 'neutral'
-    if sw_h[-1] > sw_h[-2] and sw_l[-1] > sw_l[-2]: return 'bullish'
-    if sw_h[-1] < sw_h[-2] and sw_l[-1] < sw_l[-2]: return 'bearish'
-    return 'neutral'
+def detectar_estructura_mercado(df):
+    """BOS + CHoCH mejorado"""
+    highs = df['h'].astype(float).values
+    lows = df['l'].astype(float).values
+    swings_h = []
+    swings_l = []
+    for i in range(5, len(df)-5):
+        if highs[i] == max(highs[i-5:i+6]): swings_h.append((i, highs[i]))
+        if lows[i] == min(lows[i-5:i+6]): swings_l.append((i, lows[i]))
+    if len(swings_h) < 3 or len(swings_l) < 3: return 'neutral', None, None
+    last_hh = swings_h[-1][1]
+    prev_hh = swings_h[-2][1]
+    last_ll = swings_l[-1][1]
+    prev_ll = swings_l[-2][1]
+    if last_hh > prev_hh and last_ll > prev_ll: return 'bullish', last_ll, last_hh
+    if last_hh < prev_hh and last_ll < prev_ll: return 'bearish', last_ll, last_hh
+    return 'neutral', last_ll, last_hh
 
-def detectar_order_blocks(df, n=5):
+def detectar_liquidity_sweep(df):
+    """Liquidity Sweep (estrategia SMC ultra efectiva)"""
+    if len(df) < 30: return None
+    prev_low = df['l'].rolling(15).min().iloc[-6]
+    prev_high = df['h'].rolling(15).max().iloc[-6]
+    last = df.iloc[-1]
+    if float(last['l']) < prev_low and last['is_bullish']: return 'bull_sweep'
+    if float(last['h']) > prev_high and not last['is_bullish']: return 'bear_sweep'
+    return None
+
+def detectar_breaker_block(df):
+    """Breaker Block (re-test después de BOS)"""
+    if len(df) < 20: return None
+    estructura, _, _ = detectar_estructura_mercado(df.iloc[:-5])
+    last = df.iloc[-1]
+    if estructura == 'bullish' and float(last['l']) < df['h'].iloc[-10] * 0.999 and last['is_bullish']:
+        return 'bull_breaker'
+    if estructura == 'bearish' and float(last['h']) > df['l'].iloc[-10] * 1.001 and not last['is_bullish']:
+        return 'bear_breaker'
+    return None
+
+def detectar_order_blocks(df, n=6):
     obs_bull, obs_bear = [], []
-    c, o = df['c'].astype(float).values, df['o'].astype(float).values
+    c = df['c'].astype(float).values
+    o = df['o'].astype(float).values
     for i in range(2, len(df)-n):
-        move_up = (c[i+n] - c[i]) / c[i] * 100
-        if o[i] > c[i] and move_up > 1.5: obs_bull.append({'mid': (o[i] + c[i]) / 2})
-        move_dn = (c[i] - c[i+n]) / c[i] * 100
-        if c[i] > o[i] and move_dn > 1.5: obs_bear.append({'mid': (c[i] + o[i]) / 2})
-    return obs_bull[-3:], obs_bear[-3:]
+        move = (c[i+n] - c[i]) / c[i] * 100
+        if o[i] > c[i] and move > 2.0:
+            obs_bull.append({'mid': (o[i]+c[i])/2, 'tipo': 'bull'})
+        if c[i] > o[i] and move < -2.0:
+            obs_bear.append({'mid': (o[i]+c[i])/2, 'tipo': 'bear'})
+    return obs_bull[-4:], obs_bear[-4:]
 
 def detectar_fvg(df):
     fvgs_bull, fvgs_bear = [], []
-    h, l = df['h'].astype(float).values, df['l'].astype(float).values
+    h = df['h'].astype(float).values
+    l = df['l'].astype(float).values
     for i in range(1, len(df)-1):
         if l[i+1] > h[i-1]: fvgs_bull.append({'bot': h[i-1], 'top': l[i+1]})
         if h[i+1] < l[i-1]: fvgs_bear.append({'bot': h[i+1], 'top': l[i-1]})
-    return fvgs_bull[-3:], fvgs_bear[-3:]
+    return fvgs_bull[-4:], fvgs_bear[-4:]
 
-def generar_senal(df_15m, df_1h, symbol):
-    if len(df_15m) < 210 or len(df_1h) < 50: return None
-    df_15m, df_1h = calcular_indicadores(df_15m.copy()), calcular_indicadores(df_1h.copy())
-    last = df_15m.iloc[-1]
-    precio, atr = float(last['c']), float(last['atr'])
-    est_1h = detectar_estructura(df_1h)
-    ema50_1h, ema200_1h = float(df_1h.iloc[-1]['ema50']), float(df_1h.iloc[-1]['ema200'])
-    tendencia_1h = 'bull' if ema50_1h > ema200_1h and est_1h == 'bullish' else 'bear' if ema50_1h < ema200_1h and est_1h == 'bearish' else 'neutral'
-    est_15m = detectar_estructura(df_15m)
-    obs_bull, obs_bear = detectar_order_blocks(df_15m)
-    fvgs_bull, fvgs_bear = detectar_fvg(df_15m)
-    vol_ok = float(last['vol_ratio']) > 1.2
-    score_l, score_s = 0, 0
-    razones_l, razones_s = [], []
-    if tendencia_1h == 'bull': score_l += 2; razones_l.append("Tendencia 1h alcista")
-    if est_15m == 'bullish': score_l += 2; razones_l.append("Estructura 15m alcista")
-    if precio > float(last['ema200']): score_l += 1; razones_l.append("Sobre EMA200")
-    for ob in obs_bull:
-        if abs(precio - ob['mid']) / precio < 0.005: score_l += 2; razones_l.append("En OB bull")
-    for fvg in fvgs_bull:
-        if fvg['bot'] <= precio <= fvg['top']: score_l += 2; razones_l.append("En FVG bull")
-    if vol_ok: score_l += 1; razones_l.append("Volumen OK")
-    if tendencia_1h == 'bear': score_s += 2; razones_s.append("Tendencia 1h bajista")
-    if est_15m == 'bearish': score_s += 2; razones_s.append("Estructura 15m bajista")
-    if precio < float(last['ema200']): score_s += 1; razones_s.append("Bajo EMA200")
-    for ob in obs_bear:
-        if abs(precio - ob['mid']) / precio < 0.005: score_s += 2; razones_s.append("En OB bear")
-    for fvg in fvgs_bear:
-        if fvg['bot'] <= precio <= fvg['top']: score_s += 2; razones_s.append("En FVG bear")
-    if vol_ok: score_s += 1; razones_s.append("Volumen OK")
-    MIN_SCORE = 5
-    if score_long := score_l if score_l >= MIN_SCORE else 0:
-        sl = precio - (atr * 1.5)
-        tp = precio + (atr * 1.5 * RR_RATIO)
-        return {'side': 'long', 'precio': precio, 'sl': sl, 'tp': tp, 'score': score_long, 'razones': razones_l}
-    elif score_short := score_s if score_s >= MIN_SCORE else 0:
-        sl = precio + (atr * 1.5)
-        tp = precio - (atr * 1.5 * RR_RATIO)
-        return {'side': 'short', 'precio': precio, 'sl': sl, 'tp': tp, 'score': score_short, 'razones': razones_s}
+def detectar_displacement(df):
+    """Displacement Candle (vela fuerte con volumen)"""
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    body = abs(float(last['c']) - float(last['o']))
+    total = float(last['h']) - float(last['l'])
+    if total == 0: return None
+    if body > total * 0.7 and float(last['vol_ratio']) > 1.8:
+        return 'bull' if last['is_bullish'] else 'bear'
     return None
 
 # ══════════════════════════════════════════
-# GESTIÓN DE POSICIONES
+# MOTOR DE SEÑALES ULTRA CONFLUENTE
 # ══════════════════════════════════════════
+def generar_senal(df_15m, df_1h, symbol):
+    if len(df_15m) < 250 or len(df_1h) < 80: return None
+    df_15m = calcular_indicadores(df_15m.copy())
+    df_1h = calcular_indicadores(df_1h.copy())
+    
+    last = df_15m.iloc[-1]
+    precio = float(last['c'])
+    atr = float(last['atr'])
+    
+    estructura_1h, _, _ = detectar_estructura_mercado(df_1h)
+    tendencia_1h = 'bull' if float(df_1h.iloc[-1]['ema50']) > float(df_1h.iloc[-1]['ema200']) and estructura_1h == 'bullish' else \
+                   'bear' if float(df_1h.iloc[-1]['ema50']) < float(df_1h.iloc[-1]['ema200']) and estructura_1h == 'bearish' else 'neutral'
+    
+    estructura_15m, _, _ = detectar_estructura_mercado(df_15m)
+    obs_bull, obs_bear = detectar_order_blocks(df_15m)
+    fvgs_bull, fvgs_bear = detectar_fvg(df_15m)
+    sweep = detectar_liquidity_sweep(df_15m)
+    breaker = detectar_breaker_block(df_15m)
+    displacement = detectar_displacement(df_15m)
+    vol_ok = float(last['vol_ratio']) > 1.6
+    
+    score_long = score_short = 0
+    razones = []
+    
+    if tendencia_1h == 'bull': score_long += 3
+    if estructura_15m == 'bullish': score_long += 2
+    if precio > float(last['ema200']): score_long += 1
+    for ob in obs_bull:
+        if abs(precio - ob['mid']) / precio < 0.006: score_long += 2
+    for fvg in fvgs_bull:
+        if fvg['bot'] <= precio <= fvg['top']: score_long += 2
+    if sweep == 'bull_sweep': score_long += 3; razones.append("Liquidity Sweep BULL")
+    if breaker == 'bull_breaker': score_long += 2; razones.append("Breaker Block BULL")
+    if displacement == 'bull': score_long += 2; razones.append("Displacement BULL")
+    if vol_ok: score_long += 1
+    
+    if tendencia_1h == 'bear': score_short += 3
+    if estructura_15m == 'bearish': score_short += 2
+    if precio < float(last['ema200']): score_short += 1
+    for ob in obs_bear:
+        if abs(precio - ob['mid']) / precio < 0.006: score_short += 2
+    for fvg in fvgs_bear:
+        if fvg['bot'] <= precio <= fvg['top']: score_short += 2
+    if sweep == 'bear_sweep': score_short += 3; razones.append("Liquidity Sweep BEAR")
+    if breaker == 'bear_breaker': score_short += 2; razones.append("Breaker Block BEAR")
+    if displacement == 'bear': score_short += 2; razones.append("Displacement BEAR")
+    if vol_ok: score_short += 1
+    
+    if score_long >= 7 and score_long > score_short:
+        sl = get_dynamic_sl(df_15m, 'long', precio, atr)
+        tp = precio + (precio - sl) * RR_RATIO
+        return {'side': 'long', 'precio': precio, 'sl': sl, 'tp': tp, 'score': score_long, 'razones': razones}
+    if score_short >= 7 and score_short > score_long:
+        sl = get_dynamic_sl(df_15m, 'short', precio, atr)
+        tp = precio - (sl - precio) * RR_RATIO
+        return {'side': 'short', 'precio': precio, 'sl': sl, 'tp': tp, 'score': score_short, 'razones': razones}
+    return None
+
+def get_dynamic_sl(df, side, precio, atr):
+    """SL basado en swings reales"""
+    if side == 'long':
+        swing_low = df['l'].rolling(12).min().iloc[-1]
+        return min(swing_low * 0.9995, precio - atr * 1.8)
+    else:
+        swing_high = df['h'].rolling(12).max().iloc[-1]
+        return max(swing_high * 1.0005, precio + atr * 1.8)
+
+# ══════════════════════════════════════════
+# GESTIÓN DE CAPITAL Y POSICIONES AVANZADA
+# ══════════════════════════════════════════
+def calcular_tamano_posicion(equity, precio, sl):
+    riesgo_usd = equity * RISK_PCT
+    distancia = abs(precio - sl) / precio
+    if distancia == 0: return 0
+    tamano = riesgo_usd / distancia
+    qty = tamano / precio
+    max_qty = (equity * 0.45 * LEVERAGE) / precio
+    return min(qty, max_qty)
 
 def gestionar_posiciones(posiciones, exchange):
-    db = st.session_state.db
+    if 'active_trades' not in st.session_state:
+        st.session_state.active_trades = {}
+    
     n_activas = 0
     for p in posiciones:
         qty = safe_float(p.get('contracts', 0))
         if qty <= 0: continue
         n_activas += 1
-        sym, side = p['symbol'], p['side'].upper()
-        mark, pnl = safe_float(p.get('markPrice')), safe_float(p.get('unrealizedPnl'))
-        trade = db['active_trades'].get(sym)
-        if not trade or trade.get('sl', 0) == 0:
-            entry = safe_float(p.get('entryPrice'))
-            db['active_trades'][sym] = {
-                'entry': entry, 'sl': entry * 0.98 if side == 'LONG' else entry * 1.02,
-                'tp': entry * 1.04 if side == 'LONG' else entry * 0.96, 'trailing': False
-            }
-            save_data(db)
-            trade = db['active_trades'][sym]
-            log(f"Niveles recuperados para {sym}", "WARN")
-        sl, tp, entry = trade['sl'], trade['tp'], trade['entry']
-        is_tp = (side == 'LONG' and mark >= tp) or (side == 'SHORT' and mark <= tp)
-        is_sl = (side == 'LONG' and mark <= sl) or (side == 'SHORT' and mark >= sl)
-        if is_tp or is_sl:
-            try:
-                exchange.create_market_order(sym, 'sell' if side == 'LONG' else 'buy', qty, params={'reduceOnly': True})
-                tipo = "WIN" if is_tp else "LOSS"
-                log(f"{'💰 TP' if is_tp else '🛡️ SL'} ALCANZADO: {sym} | PnL: ${pnl:.4f}", tipo)
-                db['stats']['wins' if is_tp else 'losses'] += 1
-                db['stats']['total_pnl'] += pnl
-                if sym in db['active_trades']: del db['active_trades'][sym]
-                save_data(db)
-            except Exception as e: log(f"Error cierre {sym}: {e}", "ERROR")
-        elif not trade.get('trailing', False):
-            dist_r = abs(entry - sl)
-            trigger = entry + dist_r if side == 'LONG' else entry - dist_r
-            if (side == 'LONG' and mark >= trigger) or (side == 'SHORT' and mark <= trigger):
-                db['active_trades'][sym]['sl'] = entry
-                db['active_trades'][sym]['trailing'] = True
-                save_data(db)
-                log(f"📈 Trailing: {sym} a Breakeven", "INFO")
+        sym = p['symbol']
+        side = p['side'].upper()
+        mark = safe_float(p.get('markPrice'))
+        entry = safe_float(p.get('entryPrice'))
+        pnl = safe_float(p.get('unrealizedPnl'))
+        
+        trade = st.session_state.active_trades.get(sym)
+        if not trade:
+            trade = {'entry': entry, 'sl': entry*0.985 if side=='LONG' else entry*1.015, 
+                     'tp': entry*1.04 if side=='LONG' else entry*0.96, 
+                     'partial': False, 'trailing': False}
+            st.session_state.active_trades[sym] = trade
+        
+        sl = trade['sl']
+        tp = trade['tp']
+        close_side = 'sell' if side == 'LONG' else 'buy'
+        
+        # Partial TP en 1R
+        dist_r = abs(entry - sl)
+        if not trade['partial']:
+            tp1 = entry + dist_r if side == 'LONG' else entry - dist_r
+            if (side == 'LONG' and mark >= tp1) or (side == 'SHORT' and mark <= tp1):
+                partial_qty = qty * PARTIAL_PCT
+                exchange.create_market_order(sym, close_side, partial_qty, params={'reduceOnly': True})
+                st.session_state.active_trades[sym]['partial'] = True
+                st.session_state.active_trades[sym]['sl'] = entry
+                log(f"✅ PARTIAL TP 50% {sym} | +1R asegurado", "WIN")
+        
+        # TP final o SL
+        if (side == 'LONG' and mark >= tp) or (side == 'SHORT' and mark <= tp):
+            exchange.create_market_order(sym, close_side, qty, params={'reduceOnly': True})
+            log(f"💰 TP TOTAL ALCANZADO {sym} | PnL: ${pnl:.4f}", "WIN")
+            st.session_state.stats['wins'] += 1
+            st.session_state.stats['total_pnl'] += pnl
+            st.session_state.daily_pnl += pnl
+            del st.session_state.active_trades[sym]
+            
+        elif (side == 'LONG' and mark <= sl) or (side == 'SHORT' and mark >= sl):
+            exchange.create_market_order(sym, close_side, qty, params={'reduceOnly': True})
+            log(f"🛡️ SL {sym} | PnL: ${pnl:.4f}", "LOSS")
+            st.session_state.stats['losses'] += 1
+            st.session_state.stats['total_pnl'] += pnl
+            st.session_state.daily_pnl += pnl
+            del st.session_state.active_trades[sym]
+        
+        # Trailing final
+        elif trade['partial'] and not trade.get('trailing'):
+            if (side == 'LONG' and mark >= entry + dist_r * 1.5) or (side == 'SHORT' and mark <= entry - dist_r * 1.5):
+                st.session_state.active_trades[sym]['trailing'] = True
+                log(f"📈 TRAILING AGRESIVO activado en {sym}", "INFO")
+    
     return n_activas
 
 # ══════════════════════════════════════════
-# INTERFAZ Y LOOP
+# INTERFAZ + LOOP PRINCIPAL
 # ══════════════════════════════════════════
-
-st.markdown("# 🎯 SNIPER V6.1 PRO — SMART MONEY ELITE")
-st.caption(f"Versión Corregida | {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+st.title("🎯 SNIPER V6.0 — ULTIMATE PRICE ACTION WARRIOR")
+st.caption("💎 Versión definitiva para ganar todos los días | Con la bendición de Dios nos va a ir brutal")
 
 with st.sidebar:
-    st.markdown("### 🔐 Credenciales Kraken")
-    api_key, api_secret = st.text_input("API Key", type="password"), st.text_input("API Secret", type="password")
-    leverage_ui = st.slider("Apalancamiento", 2, 20, LEVERAGE)
-    risk_pct_ui = st.slider("Riesgo por trade (%)", 1, 5, 2)
-    modo = st.radio("Selecciona:", ["🔍 Solo Análisis", "⚡ Trading Real"])
-    activar = st.toggle("INICIAR BOT", value=False)
+    st.markdown("### 🔐 Kraken Futures")
+    api_key = st.text_input("API Key", type="password")
+    api_secret = st.text_input("API Secret", type="password")
+    modo = st.radio("Modo", ["⚡ Trading REAL", "🔍 Paper (solo análisis)"])
+    activar = st.toggle("INICIAR BOT SNIPER V6.0", value=False)
 
 col1, col2, col3 = st.columns([2,2,3])
-capital_ph, posicion_ph, senal_ph = col1.empty(), col2.empty(), col3.empty()
+capital_ph = col1.empty()
+posicion_ph = col2.empty()
+senal_ph = col3.empty()
 log_ph = st.empty()
 
+if 'trade_log' not in st.session_state: st.session_state.trade_log = []
+if 'stats' not in st.session_state: st.session_state.stats = {'wins':0, 'losses':0, 'total_pnl':0.0}
+if 'active_trades' not in st.session_state: st.session_state.active_trades = {}
+if 'daily_pnl' not in st.session_state: st.session_state.daily_pnl = 0.0
+if 'last_date' not in st.session_state: st.session_state.last_date = date.today()
+
 if activar and api_key and api_secret:
-    try:
-        exchange = ccxt.krakenfutures({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True})
-        log("Bot Sniper V6.1 Pro Iniciado. 'El Señor es mi pastor, nada me falta' (Salmo 23:1)", "INFO")
-        while True:
-            db = st.session_state.db
-            try:
-                balance = exchange.fetch_total_balance()
-                equity = safe_float(balance.get('USD', 0))
-            except: equity = 0.0
-            capital_ph.markdown(f"""<div class="metric-card"><b>💼 Capital</b><br><span style="font-size:1.5em; color:#4a9eff">${equity:.4f} USD</span><br>
-            <small>W: {db['stats']['wins']} | L: {db['stats']['losses']} | PnL: ${db['stats']['total_pnl']:.4f}</small></div>""", unsafe_allow_html=True)
-            try:
-                posiciones = exchange.fetch_positions()
-                n_activas = gestionar_posiciones(posiciones, exchange)
-            except Exception as e: posiciones, n_activas = [], 0
-            pos_info = ""
-            for p in posiciones:
-                if safe_float(p.get('contracts', 0)) > 0:
-                    sym, side = p['symbol'], p['side'].upper()
-                    pnl, mark, entry = safe_float(p.get('unrealizedPnl')), safe_float(p.get('markPrice')), safe_float(p.get('entryPrice'))
-                    trade = db['active_trades'].get(sym, {})
-                    color = "#00ff88" if pnl >= 0 else "#ff4466"
-                    pos_info += f"""<div style="color:{color}; margin:4px 0"><b>{sym.split('/')[0]}</b> {side} | PnL: ${pnl:+.4f}<br>
-                    <small>Entry: {entry:.2f} | SL: {trade.get('sl',0):.2f} | TP: {trade.get('tp',0):.2f}</small></div>"""
-            posicion_ph.markdown(f"""<div class="metric-card"><b>📊 Posiciones ({n_activas}/{MAX_POSITIONS})</b><br>{pos_info if pos_info else 'Sin posiciones'}</div>""", unsafe_allow_html=True)
-            senales_encontradas = []
-            if n_activas < MAX_POSITIONS:
-                for sym in SYMBOLS:
-                    try:
-                        bars_15m = exchange.fetch_ohlcv(sym, TIMEFRAME_ENTRY, limit=250)
-                        bars_1h  = exchange.fetch_ohlcv(sym, TIMEFRAME_TREND, limit=250)
-                        senal = generar_senal(pd.DataFrame(bars_15m, columns=['ts','o','h','l','c','v']), pd.DataFrame(bars_1h, columns=['ts','o','h','l','c','v']), sym)
-                        if senal:
-                            senal['symbol'] = sym
-                            senales_encontradas.append(senal)
-                            if modo == "⚡ Trading Real":
-                                dist_sl = abs(senal['precio'] - senal['sl']) / senal['precio']
-                                qty = (equity * (risk_pct_ui/100)) / dist_sl / senal['precio']
-                                if (qty * senal['precio']) / leverage_ui > equity * 0.45: qty = (equity * 0.45 * leverage_ui) / senal['precio']
-                                if qty > 0:
-                                    if 'BTC' in sym: qty = round(qty, 5)
-                                    elif 'ETH' in sym: qty = round(qty, 4)
-                                    else: qty = round(qty, 2)
-                                    db['active_trades'][sym] = {'entry': senal['precio'], 'sl': senal['sl'], 'tp': senal['tp'], 'trailing': False}
-                                    save_data(db)
-                                    exchange.create_market_order(sym, 'buy' if senal['side'] == 'long' else 'sell', qty)
-                                    log(f"ORDEN: {senal['side'].upper()} {qty} {sym}", "TRADE")
-                                    n_activas += 1
-                                    if n_activas >= MAX_POSITIONS: break
-                    except Exception as e: log(f"Error {sym}: {str(e)[:40]}", "ERROR")
-            senales_html = ""
-            for s in senales_encontradas:
-                color = '#00ff88' if s['side']=='long' else '#ff4466'
-                senales_html += f"""<div style="border-left: 3px solid {color}; padding-left: 8px; margin: 8px 0;"><span style="color:{color}"><b>{s['side'].upper()}</b> — {s['symbol'].split('/')[0]}</span><br>
-                <small>Entry: {s['precio']:.2f} | SL: {s['sl']:.2f} | TP: {s['tp']:.2f} | Score: {s['score']}</small></div>"""
-            senal_ph.markdown(f"""<div class="metric-card"><b>🎯 Señales</b><br>{senales_html if senales_html else 'Esperando...'}</div>""", unsafe_allow_html=True)
-            log_ph.markdown(f"""<div class="metric-card" style="max-height:200px; overflow-y:auto; font-family:monospace; font-size:0.8em">{"<br>".join(st.session_state.trade_log[:20])}</div>""", unsafe_allow_html=True)
-            time.sleep(30)
-            st.rerun()
-    except Exception as e:
-        st.error(f"❌ Error: {e}")
-        time.sleep(15)
+    exchange = ccxt.krakenfutures({'apiKey': api_key, 'secret': api_secret, 'enableRateLimit': True, 'options': {'defaultType': 'future'}})
+    log("🚀 SNIPER V6.0 INICIADO - Que Dios nos bendiga y nos dé ganancias diarias", "INFO")
+    
+    while True:
+        # Fecha y daily loss
+        today = date.today()
+        if today != st.session_state.last_date:
+            st.session_state.last_date = today
+            st.session_state.daily_pnl = 0.0
+        
+        # Balance
+        try:
+            balance = exchange.fetch_balance()
+            equity = safe_float(balance.get('USD', {}).get('total', 0))
+        except: equity = 0.0
+        
+        capital_ph.markdown(f"""
+💼 EQUITY
+${equity:.4f}
+
+        W:{st.session_state.stats['wins']} | L:{st.session_state.stats['losses']} | PnL Total: ${st.session_state.stats['total_pnl']:.4f}
+
+        Hoy: ${st.session_state.daily_pnl:.4f} ({st.session_state.daily_pnl/equity*100 if equity else 0:+.2f}%)
+""", unsafe_allow_html=True)
+        
+        # Posiciones
+        posiciones = exchange.fetch_positions()
+        n_activas = gestionar_posiciones(posiciones, exchange)
+        
+        # Daily loss protection
+        if st.session_state.daily_pnl < -equity * MAX_DAILY_LOSS_PCT and equity > 0:
+            log("🚨 LÍMITE DIARIO ALCANZADO. Bot pausado 24h para proteger tu capital", "WARN")
+            time.sleep(3600)
+            continue
+        
+        # Señales
+        senales = []
+        if n_activas < MAX_POSITIONS:
+            for sym in SYMBOLS:
+                try:
+                    bars15 = exchange.fetch_ohlcv(sym, TIMEFRAME_ENTRY, limit=BARS_LIMIT)
+                    bars1h = exchange.fetch_ohlcv(sym, TIMEFRAME_TREND, limit=BARS_LIMIT)
+                    df15 = pd.DataFrame(bars15, columns=['ts','o','h','l','c','v'])
+                    df1h = pd.DataFrame(bars1h, columns=['ts','o','h','l','c','v'])
+                    senal = generar_senal(df15, df1h, sym)
+                    if senal:
+                        senal['symbol'] = sym
+                        senales.append(senal)
+                        if modo == "⚡ Trading REAL":
+                            qty = calcular_tamano_posicion(equity, senal['precio'], senal['sl'])
+                            if qty > 0:
+                                side_order = 'buy' if senal['side'] == 'long' else 'sell'
+                                exchange.create_market_order(sym, side_order, qty)
+                                st.session_state.active_trades[sym] = {
+                                    'entry': senal['precio'], 'sl': senal['sl'], 'tp': senal['tp'],
+                                    'partial': False, 'trailing': False
+                                }
+                                log(f"🚀 ENTRADA {senal['side'].upper()} {qty:.6f} {sym} | Score {senal['score']}", "TRADE")
+                                n_activas += 1
+                                if n_activas >= MAX_POSITIONS: break
+                except Exception as e:
+                    log(f"Error {sym}: {str(e)[:60]}", "ERROR")
+        
+        # Mostrar todo
+        pos_html = ""
+        for p in posiciones:
+            if safe_float(p.get('contracts')) > 0:
+                sym = p['symbol']
+                side = p['side'].upper()
+                pnl = safe_float(p.get('unrealizedPnl'))
+                color = "#00ff88" if pnl >= 0 else "#ff4466"
+                trade = st.session_state.active_trades.get(sym, {})
+                pos_html += f"""
+{sym.split('/')[0]} {side} | PnL ${pnl:+.4f}
+
+                SL:{trade.get('sl',0):.2f} | TP:{trade.get('tp',0):.2f}
+"""
+        
+        posicion_ph.markdown(f"""
+📍 POSICIONES ({n_activas}/{MAX_POSITIONS})
+{pos_html or 'Sin posiciones abiertas'}
+""", unsafe_allow_html=True)
+        
+        senal_html = ""
+        for s in senales:
+            color = '#00ff88' if s['side']=='long' else '#ff4466'
+            senal_html += f"""
+
+            {s['side'].upper()} {s['symbol'].split('/')[0]}
+
+            Entry {s['precio']:.2f} | SL {s['sl']:.2f} | TP {s['tp']:.2f} | Score {s['score']}
+
+            {' • '.join(s['razones'][:4])}
+"""
+        senal_ph.markdown(f"""
+🎯 SEÑALES EN VIVO
+{senal_html or 'Esperando confluencia perfecta...'}
+""", unsafe_allow_html=True)
+        
+        log_ph.markdown(f"""
+{"
+".join(st.session_state.trade_log[:25])}
+""", unsafe_allow_html=True)
+        
+        time.sleep(25)
         st.rerun()
+
 else:
-    st.info("💡 Ingresa credenciales y activa el bot. 'El que es fiel en lo muy poco, también en lo mucho es fiel' (Lucas 16:10)")
+    st.success("✅ Ingresa tus credenciales y activa el bot. ¡Listo para ganar todos los días!")
