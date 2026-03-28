@@ -803,7 +803,7 @@ def calcular_posicion_v8(equity: float, precio: float, sl: float, leverage: int,
     tamano_nominal = riesgo_usd / distancia_sl
     qty = tamano_nominal / precio
     
-    min_size = symbol_config.get('min_size', 0.0001)
+    min_size = symbol_config.get('min_size', 0.0001)*0.1
     if qty < min_size:
         qty = min_size
     
