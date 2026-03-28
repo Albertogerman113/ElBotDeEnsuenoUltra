@@ -1,7 +1,7 @@
 # ============================================================================
-# SNIPER V8.0 - PRICE ACTION ELITE INSTITUTIONAL (VERSIÓN PROFESIONAL)
+# SNIPER V8.1 - PRICE ACTION ELITE (CORREGIDO)
 # ============================================================================
-# Mejoras: Multi-TF, Scale-Out, Filtros de Noticias, Trailing Agresivo
+# Cambios: Filtros relajados, debugging detallado, NewsFilter desactivado
 # ============================================================================
 
 import streamlit as st
@@ -17,7 +17,7 @@ import json
 # CONFIGURACIÓN GLOBAL
 # ============================================================================
 st.set_page_config(
-    page_title="SNIPER V8.0 | PROFESIONAL",
+    page_title="SNIPER V8.1 | CORREGIDO",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -91,93 +91,73 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# CONFIGURACIÓN V8.0
+# CONFIGURACIÓN V8.1 - CORREGIDA
 # ============================================================================
 class Config:
-    # Símbolos con pesos de riesgo
     SYMBOLS = {
         'BTC/USD:USD': {'min_size': 0.0001, 'tick_size': 0.5, 'risk_weight': 1.0, 'correlation_group': 'major'},
         'ETH/USD:USD': {'min_size': 0.001, 'tick_size': 0.05, 'risk_weight': 0.8, 'correlation_group': 'major'},
         'SOL/USD:USD': {'min_size': 0.01, 'tick_size': 0.001, 'risk_weight': 0.6, 'correlation_group': 'alt'}
     }
     
-    # Gestión de riesgo SEVERA
     LEVERAGE_DEFAULT = 10
-    RISK_PCT_DEFAULT = 0.01  # 1% por trade (más conservador)
+    RISK_PCT_DEFAULT = 0.01
     RR_RATIO = 2.0
-    MAX_POSITIONS = 2
-    MAX_DAILY_TRADES = 5  # Reducido para calidad sobre cantidad
-    MAX_DAILY_LOSS_PCT = 0.03  # 3% máximo por día
-    MAX_WEEKLY_LOSS_PCT = 0.08  # 8% máximo por semana
-    MAX_CONSECUTIVE_LOSSES = 3  # Stop después de 3 pérdidas seguidas
+    MAX_POSITIONS = 3
+    MAX_DAILY_TRADES = 10
+    MAX_DAILY_LOSS_PCT = 0.05
+    MAX_WEEKLY_LOSS_PCT = 0.15
+    MAX_CONSECUTIVE_LOSSES = 5
     
-    # Timeframes
     TIMEFRAME_ENTRY = '15m'
     TIMEFRAME_TREND = '1h'
     TIMEFRAME_CONFIRM = '5m'
-    TIMEFRAME_HIGH = '4h'  # ✅ NUEVO: Timeframe superior
-    BARS_LIMIT = 500
+    TIMEFRAME_HIGH = '4h'
+    BARS_LIMIT = 200
     
-    # Parámetros de estrategia
-    OB_STRENGTH = 2.0  # Aumentado para más calidad
-    FVG_MIN_GAP = 0.004  # Aumentado
-    MSS_CONFIRMATION_BARS = 3
-    VOLUME_CONFIRMATION = 1.5  # Aumentado
-    MIN_SCORE_BASE = 7.0  # Aumentado de 6.0 a 7.0
+    # PARÁMETROS RELAJADOS
+    OB_STRENGTH = 1.0
+    FVG_MIN_GAP = 0.002
+    MSS_CONFIRMATION_BARS = 2
+    VOLUME_CONFIRMATION = 1.0
+    MIN_SCORE_BASE = 4.0
     
-    # ✅ FILTROS DE VOLATILIDAD
-    VOLATILITY_FILTER_ENABLED = True
-    MAX_ATR_PCT = 2.5  # No operar si ATR% > 2.5%
-    MIN_ATR_PCT = 0.3  # No operar si ATR% < 0.3% (mercado muerto)
+    # FILTROS DESACTIVADOS PARA PRUEBA
+    VOLATILITY_FILTER_ENABLED = False
+    MAX_ATR_PCT = 5.0
+    MIN_ATR_PCT = 0.05
     
-    # ✅ FILTROS DE HORARIOS (Noticias importantes)
-    NEWS_FILTER_ENABLED = True
-    PROHIBITED_HOURS = [
-        {'start': '13:30', 'end': '14:30', 'reason': 'CPI/NFP releases (UTC)'},
-        {'start': '19:00', 'end': '20:00', 'reason': 'FOMC meetings (UTC)'},
-        {'start': '00:00', 'end': '01:00', 'reason': 'Daily close volatility (UTC)'},
-    ]
+    # HORARIOS DESACTIVADOS
+    NEWS_FILTER_ENABLED = False
+    PROHIBITED_HOURS = []
     
-    # ✅ SCALE-OUT CONFIG
     SCALE_OUT_ENABLED = True
-    SCALE_OUT_TP1_PCT = 0.02  # 2% profit para cerrar 50%
-    SCALE_OUT_TP1_PERCENT = 0.5  # Cerrar 50% en TP1
+    SCALE_OUT_TP1_PCT = 0.02
+    SCALE_OUT_TP1_PERCENT = 0.5
     TRAILING_AFTER_SCALE = True
     
-    # ✅ TRAILING STOP AGRESIVO
     TRAILING_ENABLED = True
-    BREAKEVEN_AT_R = 0.8  # Breakeven a 0.8R
-    TRAILING_START_AT_R = 1.0  # Trailing inicia a 1R
-    TRAILING_DISTANCE_ATR_MULT = 0.5  # Distancia de trailing
+    BREAKEVEN_AT_R = 0.8
+    TRAILING_START_AT_R = 1.0
+    TRAILING_DISTANCE_ATR_MULT = 0.5
     
-    # Rate limiting
-    RATE_LIMIT_DELAY = 30  # Aumentado a 30 segundos
+    RATE_LIMIT_DELAY = 10
 
 # ============================================================================
 # INICIALIZACIÓN DE SESSION STATE
 # ============================================================================
 def init_session_state():
-    """Inicializa session_state con TODAS las variables necesarias"""
-    
     if 'trade_log' not in st.session_state:
         st.session_state.trade_log = []
     
     if 'trade_stats' not in st.session_state:
         st.session_state.trade_stats = {
-            'wins': 0,
-            'losses': 0,
-            'total_pnl': 0.0,
-            'avg_win': 0.0,
-            'avg_loss': 0.0,
-            'max_drawdown': 0.0,
-            'largest_win': 0.0,
-            'largest_loss': 0.0,
-            'consecutive_wins': 0,
-            'consecutive_losses': 0,
-            'max_consecutive_wins': 0,
-            'max_consecutive_losses': 0,
-            'total_trades': 0,
-            'profit_factor': 0.0
+            'wins': 0, 'losses': 0, 'total_pnl': 0.0,
+            'avg_win': 0.0, 'avg_loss': 0.0, 'max_drawdown': 0.0,
+            'largest_win': 0.0, 'largest_loss': 0.0,
+            'consecutive_wins': 0, 'consecutive_losses': 0,
+            'max_consecutive_wins': 0, 'max_consecutive_losses': 0,
+            'total_trades': 0, 'profit_factor': 0.0
         }
     
     if 'active_trades' not in st.session_state:
@@ -223,7 +203,7 @@ class LogManager:
             "INFO": "📊", "TRADE": "🎯", "WIN": "💰", 
             "LOSS": "⚠️", "WARN": "⚡", "ERROR": "❌",
             "SYSTEM": "🔧", "RISK": "🛡️", "SCALE": "📊",
-            "PAUSE": "⏸️", "FILTER": "🚫"
+            "PAUSE": "⏸️", "FILTER": "🚫", "DEBUG": "🔍"
         }
         icon = icons.get(level, "•")
         entry = f"[{now}] {icon} [{level}] {msg}"
@@ -270,116 +250,76 @@ def set_equity(value: float):
     st.session_state.equity_cache = value
 
 # ============================================================================
-# ✅ FILTROS DE MERCADO (NUEVO EN V8.0)
+# FILTROS SIMPLIFICADOS
 # ============================================================================
 class MarketFilters:
     
     @staticmethod
     def check_prohibited_hours() -> Tuple[bool, str]:
-        """✅ Verifica si estamos en horario de noticias importantes"""
         if not Config.NEWS_FILTER_ENABLED:
             return False, ""
         
         now_utc = datetime.now(timezone.utc).strftime('%H:%M')
-        
         for h in Config.PROHIBITED_HOURS:
             if h['start'] <= now_utc <= h['end']:
                 return True, h['reason']
-        
         return False, ""
     
     @staticmethod
     def check_volatility_filter(df: pd.DataFrame) -> Tuple[bool, str]:
-        """✅ Verifica si la volatilidad está en rango operable"""
         if not Config.VOLATILITY_FILTER_ENABLED:
             return True, ""
-        
         if len(df) < 14:
             return True, ""
         
         atr_pct = df['atr_pct'].iloc[-1]
-        
         if atr_pct > Config.MAX_ATR_PCT:
             return False, f"Volatilidad extrema: {atr_pct:.2f}%"
-        
         if atr_pct < Config.MIN_ATR_PCT:
             return False, f"Mercado muy quieto: {atr_pct:.2f}%"
-        
         return True, ""
     
     @staticmethod
     def check_correlation(symbol: str, active_positions: Dict) -> Tuple[bool, str]:
-        """✅ Evita sobrexposición a activos correlacionados"""
         if len(active_positions) >= Config.MAX_POSITIONS:
             return False, "Máximo de posiciones alcanzado"
-        
-        symbol_config = Config.SYMBOLS.get(symbol, {})
-        current_group = symbol_config.get('correlation_group', 'unknown')
-        
-        # ✅ Evita tener BTC y ETH al mismo tiempo (90% correlacionados)
-        if current_group == 'major':
-            for pos_symbol in active_positions.keys():
-                pos_config = Config.SYMBOLS.get(pos_symbol, {})
-                if pos_config.get('correlation_group') == 'major':
-                    return False, f"Correlación alta con {pos_symbol}"
-        
         return True, ""
     
     @staticmethod
     def check_daily_limits() -> Tuple[bool, str]:
-        """✅ Verifica límites diarios de trading"""
-        # Reset diario
         today = datetime.now().strftime('%Y-%m-%d')
         if st.session_state.get('last_reset_date') != today:
             st.session_state.daily_trades = 0
             st.session_state.daily_pnl = 0.0
             st.session_state.last_reset_date = today
         
-        # Reset semanal
         current_week = datetime.now().strftime('%Y-%W')
         if st.session_state.get('last_week_reset') != current_week:
             st.session_state.weekly_pnl = 0.0
             st.session_state.last_week_reset = current_week
         
-        # Límite de trades diarios
         if st.session_state.daily_trades >= Config.MAX_DAILY_TRADES:
-            return False, "Límite diario de trades alcanzado"
+            return False, f"Límite diario de trades ({Config.MAX_DAILY_TRADES}) alcanzado"
         
-        # Límite de pérdida diaria
         equity = get_equity()
-        if st.session_state.daily_pnl < -equity * Config.MAX_DAILY_LOSS_PCT:
+        if equity > 0 and st.session_state.daily_pnl < -equity * Config.MAX_DAILY_LOSS_PCT:
             return False, f"Límite de pérdida diaria ({Config.MAX_DAILY_LOSS_PCT*100:.0f}%) alcanzado"
         
-        # Límite de pérdida semanal
-        if st.session_state.weekly_pnl < -equity * Config.MAX_WEEKLY_LOSS_PCT:
+        if equity > 0 and st.session_state.weekly_pnl < -equity * Config.MAX_WEEKLY_LOSS_PCT:
             return False, f"Límite de pérdida semanal ({Config.MAX_WEEKLY_LOSS_PCT*100:.0f}%) alcanzado"
         
-        # Límite de pérdidas consecutivas
         stats = st.session_state.trade_stats
         if stats['consecutive_losses'] >= Config.MAX_CONSECUTIVE_LOSSES:
-            return False, f"{Config.MAX_CONSECUTIVE_LOSSES} pérdidas consecutivas - PAUSA REQUERIDA"
+            return False, f"{Config.MAX_CONSECUTIVE_LOSSES} pérdidas consecutivas - PAUSA"
         
         return True, "OK"
     
     @staticmethod
     def check_multi_timeframe_alignment(df_15m: pd.DataFrame, df_1h: pd.DataFrame, 
                                         df_4h: pd.DataFrame) -> Tuple[bool, str]:
-        """✅ Requiere alineación de múltiples timeframes"""
-        if len(df_15m) < 200 or len(df_1h) < 200 or len(df_4h) < 200:
+        if len(df_15m) < 50 or len(df_1h) < 50:
             return False, "Datos insuficientes"
-        
-        # Trend en cada timeframe
-        trend_15m = df_15m['ema50'].iloc[-1] > df_15m['ema200'].iloc[-1]
-        trend_1h = df_1h['ema50'].iloc[-1] > df_1h['ema200'].iloc[-1]
-        trend_4h = df_4h['ema50'].iloc[-1] > df_4h['ema200'].iloc[-1]
-        
-        alignment_count = sum([trend_15m, trend_1h, trend_4h])
-        
-        # Requiere al menos 2 de 3 timeframes alineados
-        if alignment_count >= 2:
-            return True, f"Alineación: {alignment_count}/3 TFs"
-        
-        return False, f"Alineación insuficiente: {alignment_count}/3 TFs"
+        return True, "OK"
 
 # ============================================================================
 # INDICADORES TÉCNICOS
@@ -532,11 +472,9 @@ class TechnicalIndicators:
         return patterns
 
 # ============================================================================
-# ✅ GESTIÓN DE POSICIONES CON SCALE-OUT Y TRAILING (V8.0)
+# GESTIÓN DE POSICIONES CON SCALE-OUT Y TRAILING
 # ============================================================================
 def gestionar_posiciones_v8(posiciones: List[Dict], exchange, logger: LogManager) -> int:
-    """Gestiona posiciones con Scale-Out y Trailing Stop Agresivo"""
-    
     n_activas = 0
     
     for p in posiciones:
@@ -574,7 +512,7 @@ def gestionar_posiciones_v8(posiciones: List[Dict], exchange, logger: LogManager
         trade = st.session_state.active_trades[sym]
         sl, tp = trade['sl_current'], trade['tp_current']
         
-        # ✅ SCALE-OUT (Cerrar 50% en TP1)
+        # SCALE-OUT
         if Config.SCALE_OUT_ENABLED and not trade.get('scale_out_done', False):
             profit_pct = abs(mark - entry) / entry if entry > 0 else 0
             
@@ -590,8 +528,6 @@ def gestionar_posiciones_v8(posiciones: List[Dict], exchange, logger: LogManager
                     
                     trade['current_qty'] -= half_qty
                     trade['scale_out_done'] = True
-                    
-                    # Mover SL a breakeven después de scale-out
                     trade['sl_current'] = entry * (1.002 if side == 'LONG' else 0.998)
                     trade['breakeven_reached'] = True
                     
@@ -600,7 +536,7 @@ def gestionar_posiciones_v8(posiciones: List[Dict], exchange, logger: LogManager
                 except Exception as e:
                     logger.log(f"Error en scale-out {sym}: {str(e)[:50]}", "ERROR")
         
-        # Verificar TP/SL para cierre total
+        # Verificar TP/SL
         close_side = 'sell' if side == 'LONG' else 'buy'
         is_tp = (side == 'LONG' and mark >= tp) or (side == 'SHORT' and mark <= tp)
         is_sl = (side == 'LONG' and mark <= sl) or (side == 'SHORT' and mark >= sl)
@@ -636,11 +572,9 @@ def gestionar_posiciones_v8(posiciones: List[Dict], exchange, logger: LogManager
                 if stats['total_pnl'] < stats['max_drawdown']:
                     stats['max_drawdown'] = stats['total_pnl']
                 
-                # Actualizar PnL diario y semanal
                 st.session_state.daily_pnl += pnl
                 st.session_state.weekly_pnl += pnl
                 
-                # Calcular profit factor
                 if stats['avg_loss'] > 0:
                     stats['profit_factor'] = stats['avg_win'] / stats['avg_loss']
                 else:
@@ -652,23 +586,20 @@ def gestionar_posiciones_v8(posiciones: List[Dict], exchange, logger: LogManager
                 logger.log(f"Error cerrando {sym}: {str(e)[:60]}", "ERROR")
             continue
         
-        # ✅ TRAILING STOP AGRESIVO
+        # TRAILING STOP
         if Config.TRAILING_ENABLED:
             r_mult = abs(mark - entry) / trade['entry_risk'] if trade['entry_risk'] > 0 else 0
             
-            # Breakeven a 0.8R
             if not trade['breakeven_reached'] and r_mult >= Config.BREAKEVEN_AT_R:
                 trade['sl_current'] = entry * (1.002 if side == 'LONG' else 0.998)
                 trade['breakeven_reached'] = True
                 logger.log(f"{sym}: Breakeven activado @ {Config.BREAKEVEN_AT_R}R", "RISK")
             
-            # Trailing a 1R
             elif trade['breakeven_reached'] and not trade['trailing_active'] and r_mult >= Config.TRAILING_START_AT_R:
                 trade['trailing_active'] = True
                 trade['trailing_start'] = mark
                 logger.log(f"{sym}: Trailing activado @ {Config.TRAILING_START_AT_R}R", "RISK")
             
-            # Trailing activo - Muy agresivo
             elif trade['trailing_active']:
                 atr = trade.get('atr', 0.01 * entry)
                 trail_dist = atr * Config.TRAILING_DISTANCE_ATR_MULT
@@ -685,34 +616,25 @@ def gestionar_posiciones_v8(posiciones: List[Dict], exchange, logger: LogManager
     return n_activas
 
 # ============================================================================
-# ✅ GENERADOR DE SEÑALES V8.0 (CON TODOS LOS FILTROS)
+# GENERADOR DE SEÑALES V8.1 - CON DEBUGGING
 # ============================================================================
 class SignalGeneratorV8:
     def __init__(self):
         self.filters = MarketFilters()
     
     def generar_senal_premium(self, df_15m: pd.DataFrame, df_1h: pd.DataFrame, 
-                              df_5m: pd.DataFrame, df_4h: pd.DataFrame,
-                              symbol: str) -> Optional[Dict]:
-        """Genera señal con TODOS los filtros V8.0"""
+                              df_4h: pd.DataFrame, symbol: str, logger: LogManager) -> Optional[Dict]:
+        """Genera señal con logging detallado"""
         
-        if len(df_15m) < 210 or len(df_1h) < 50 or len(df_4h) < 50:
+        logger.log(f"Analizando {symbol}...", "DEBUG")
+        
+        if len(df_15m) < 50 or len(df_1h) < 50:
+            logger.log(f"{symbol}: Datos insuficientes (15m:{len(df_15m)}, 1h:{len(df_1h)})", "WARN")
             return None
         
         # Calcular indicadores
         df_15m = TechnicalIndicators.calcular_indicadores_premium(df_15m)
         df_1h = TechnicalIndicators.calcular_indicadores_premium(df_1h)
-        df_4h = TechnicalIndicators.calcular_indicadores_premium(df_4h)
-        
-        # ✅ FILTRO 1: Volatilidad
-        vol_ok, vol_msg = self.filters.check_volatility_filter(df_15m)
-        if not vol_ok:
-            return None
-        
-        # ✅ FILTRO 2: Multi-timeframe alignment
-        tf_ok, tf_msg = self.filters.check_multi_timeframe_alignment(df_15m, df_1h, df_4h)
-        if not tf_ok:
-            return None
         
         last_15m = df_15m.iloc[-1]
         precio = float(last_15m['c'])
@@ -723,127 +645,145 @@ class SignalGeneratorV8:
         
         session_name, session_weight = get_current_session()
         
-        # Estructura de mercado
-        estructura_1h, _, _ = TechnicalIndicators.detectar_mss(df_1h)
+        # Estructura de mercado simplificada
+        ema50_15m = float(last_15m['ema50'])
+        ema200_15m = float(last_15m['ema200'])
         ema50_1h = float(df_1h.iloc[-1]['ema50'])
         ema200_1h = float(df_1h.iloc[-1]['ema200'])
         
-        tendencia_dir = 'bull' if ema50_1h > ema200_1h * 1.002 else 'bear' if ema50_1h < ema200_1h * 0.998 else 'neutral'
+        tendencia_15m = 'bull' if ema50_15m > ema200_15m * 1.001 else 'bear' if ema50_15m < ema200_15m * 0.999 else 'neutral'
+        tendencia_1h = 'bull' if ema50_1h > ema200_1h * 1.001 else 'bear' if ema50_1h < ema200_1h * 0.999 else 'neutral'
         
         estructura_15m, swing_low_15m, swing_high_15m = TechnicalIndicators.detectar_mss(df_15m)
         obs_bull, obs_bear = TechnicalIndicators.detectar_order_blocks(df_15m)
         fvgs_bull, fvgs_bear = TechnicalIndicators.detectar_fvg(df_15m)
         patrones = TechnicalIndicators.detectar_patrones_velas(df_15m)
         
+        logger.log(f"{symbol}: Precio={precio:.2f}, RSI={rsi:.1f}, Vol={vol_ratio:.2f}x, Tend15m={tendencia_15m}, Tend1h={tendencia_1h}", "DEBUG")
+        
         # Scoring
         score_long, score_short = 0, 0
         razones_long, razones_short = [], []
         
         # LONG scoring
-        if tendencia_dir == 'bull':
+        if tendencia_1h == 'bull':
             score_long += 3.5
-            razones_long.append("Tendencia 1H alcista ✓")
-        if estructura_15m in ['bullish', 'bullish_mss']:
-            score_long += 3.0
-            razones_long.append(f"Estructura: {estructura_15m}")
-        if precio > float(last_15m['ema200']) * 1.001:
+            razones_long.append("Tendencia 1H alcista")
+        if tendencia_15m == 'bull':
             score_long += 2.0
+            razones_long.append("Tendencia 15m alcista")
+        if estructura_15m in ['bullish', 'bullish_mss']:
+            score_long += 2.0
+            razones_long.append(f"Estructura: {estructura_15m}")
+        if precio > ema200_15m * 1.001:
+            score_long += 1.5
             razones_long.append("Precio sobre EMA200")
         
         for ob in obs_bull:
-            if abs(precio - ob['mid']) / precio < 0.004 and ob['strength'] > Config.OB_STRENGTH:
-                score_long += 2.5
+            if abs(precio - ob['mid']) / precio < 0.005:
+                score_long += 2.0
                 razones_long.append(f"OB Bull ({ob['strength']:.1f}%)")
+                break
         
         for fvg in fvgs_bull:
-            if fvg['bot'] <= precio <= fvg['top'] and fvg['gap_size'] > Config.FVG_MIN_GAP:
-                score_long += 2.5
-                razones_long.append(f"FVG Bull ({fvg['gap_size']*100:.2f}%)")
+            if fvg['bot'] <= precio <= fvg['top']:
+                score_long += 2.0
+                razones_long.append(f"FVG Bull")
+                break
         
         if patrones['pin'] == 'bull_pin':
-            score_long += 2.5
-            razones_long.append("Pin Bar alcista")
-        if patrones['engulfing'] == 'bull_engulfing' and vol_ratio > 1.5:
-            score_long += 3.0
-            razones_long.append("Engulfing + volumen fuerte")
-        if 35 < rsi < 55:
-            score_long += 1.5
-            razones_long.append(f"RSI neutral: {rsi:.1f}")
-        if vol_ratio > Config.VOLUME_CONFIRMATION:
             score_long += 2.0
+            razones_long.append("Pin Bar alcista")
+        if patrones['engulfing'] == 'bull_engulfing':
+            score_long += 2.5
+            razones_long.append("Engulfing alcista")
+        if 30 < rsi < 60:
+            score_long += 1.5
+            razones_long.append(f"RSI favorable: {rsi:.1f}")
+        if vol_ratio > Config.VOLUME_CONFIRMATION:
+            score_long += 1.5
             razones_long.append(f"Volumen {vol_ratio:.2f}x")
         
         score_long *= session_weight
         
         # SHORT scoring
-        if tendencia_dir == 'bear':
+        if tendencia_1h == 'bear':
             score_short += 3.5
-            razones_short.append("Tendencia 1H bajista ✓")
-        if estructura_15m in ['bearish', 'bearish_mss']:
-            score_short += 3.0
-            razones_short.append(f"Estructura: {estructura_15m}")
-        if precio < float(last_15m['ema200']) * 0.999:
+            razones_short.append("Tendencia 1H bajista")
+        if tendencia_15m == 'bear':
             score_short += 2.0
+            razones_short.append("Tendencia 15m bajista")
+        if estructura_15m in ['bearish', 'bearish_mss']:
+            score_short += 2.0
+            razones_short.append(f"Estructura: {estructura_15m}")
+        if precio < ema200_15m * 0.999:
+            score_short += 1.5
             razones_short.append("Precio bajo EMA200")
         
         for ob in obs_bear:
-            if abs(precio - ob['mid']) / precio < 0.004 and ob['strength'] > Config.OB_STRENGTH:
-                score_short += 2.5
+            if abs(precio - ob['mid']) / precio < 0.005:
+                score_short += 2.0
                 razones_short.append(f"OB Bear ({ob['strength']:.1f}%)")
+                break
         
         for fvg in fvgs_bear:
-            if fvg['bot'] <= precio <= fvg['top'] and fvg['gap_size'] > Config.FVG_MIN_GAP:
-                score_short += 2.5
-                razones_short.append(f"FVG Bear ({fvg['gap_size']*100:.2f}%)")
+            if fvg['bot'] <= precio <= fvg['top']:
+                score_short += 2.0
+                razones_short.append(f"FVG Bear")
+                break
         
         if patrones['pin'] == 'bear_pin':
-            score_short += 2.5
-            razones_short.append("Pin Bar bajista")
-        if patrones['engulfing'] == 'bear_engulfing' and vol_ratio > 1.5:
-            score_short += 3.0
-            razones_short.append("Engulfing + volumen fuerte")
-        if 45 < rsi < 65:
-            score_short += 1.5
-            razones_short.append(f"RSI neutral: {rsi:.1f}")
-        if vol_ratio > Config.VOLUME_CONFIRMATION:
             score_short += 2.0
+            razones_short.append("Pin Bar bajista")
+        if patrones['engulfing'] == 'bear_engulfing':
+            score_short += 2.5
+            razones_short.append("Engulfing bajista")
+        if 40 < rsi < 70:
+            score_short += 1.5
+            razones_short.append(f"RSI favorable: {rsi:.1f}")
+        if vol_ratio > Config.VOLUME_CONFIRMATION:
+            score_short += 1.5
             razones_short.append(f"Volumen {vol_ratio:.2f}x")
         
         score_short *= session_weight
         
-        # Umbral dinámico (más alto para más calidad)
+        # Umbral dinámico
         base_threshold = Config.MIN_SCORE_BASE
-        dynamic_threshold = base_threshold * (1 + atr_pct / 2) * (1 / session_weight)
-        MIN_SCORE = max(6.0, min(10.0, dynamic_threshold))
+        dynamic_threshold = base_threshold * (1 + atr_pct / 3) * (1 / session_weight)
+        MIN_SCORE = max(4.0, min(8.0, dynamic_threshold))
         
-        if score_long >= MIN_SCORE and score_long > score_short + 2.0:
-            sl_dist = atr * (1.3 + atr_pct / 3)
+        logger.log(f"{symbol}: Score L={score_long:.1f}, S={score_short:.1f}, Umbral={MIN_SCORE:.1f}", "INFO")
+        
+        if score_long >= MIN_SCORE and score_long > score_short + 1.5:
+            sl_dist = atr * (1.2 + atr_pct / 4)
             sl = precio - sl_dist
             tp = precio + sl_dist * Config.RR_RATIO
             
             if swing_low_15m and swing_low_15m < sl:
                 sl = swing_low_15m * 0.9995
             
+            logger.log(f"🎯 SEÑAL LONG {symbol}! Score:{score_long:.1f}, Entry:{precio:.2f}", "TRADE")
             return {
                 'symbol': symbol, 'side': 'long', 'entry': precio, 'sl': sl, 'tp': tp,
                 'atr': atr, 'atr_pct': atr_pct, 'score': score_long,
                 'razones': razones_long, 'session': session_name,
-                'timestamp': datetime.now(timezone.utc), 'filters_passed': [vol_msg, tf_msg]
+                'timestamp': datetime.now(timezone.utc)
             }
         
-        elif score_short >= MIN_SCORE and score_short > score_long + 2.0:
-            sl_dist = atr * (1.3 + atr_pct / 3)
+        elif score_short >= MIN_SCORE and score_short > score_long + 1.5:
+            sl_dist = atr * (1.2 + atr_pct / 4)
             sl = precio + sl_dist
             tp = precio - sl_dist * Config.RR_RATIO
             
             if swing_high_15m and swing_high_15m > sl:
                 sl = swing_high_15m * 1.0005
             
+            logger.log(f"🎯 SEÑAL SHORT {symbol}! Score:{score_short:.1f}, Entry:{precio:.2f}", "TRADE")
             return {
                 'symbol': symbol, 'side': 'short', 'entry': precio, 'sl': sl, 'tp': tp,
                 'atr': atr, 'atr_pct': atr_pct, 'score': score_short,
                 'razones': razones_short, 'session': session_name,
-                'timestamp': datetime.now(timezone.utc), 'filters_passed': [vol_msg, tf_msg]
+                'timestamp': datetime.now(timezone.utc)
             }
         
         return None
@@ -853,7 +793,6 @@ class SignalGeneratorV8:
 # ============================================================================
 def calcular_posicion_v8(equity: float, precio: float, sl: float, leverage: int, 
                          symbol_config: Dict) -> float:
-    """Calcula tamaño de posición con gestión de riesgo conservadora"""
     risk_pct = Config.RISK_PCT_DEFAULT
     riesgo_usd = equity * risk_pct
     distancia_sl = abs(precio - sl) / (precio + 1e-10)
@@ -868,8 +807,7 @@ def calcular_posicion_v8(equity: float, precio: float, sl: float, leverage: int,
     if qty < min_size:
         qty = min_size
     
-    # Límite más conservador (35% en lugar de 45%)
-    max_exposure = (equity * 0.35 * leverage) / precio
+    max_exposure = (equity * 0.4 * leverage) / precio
     if qty > max_exposure:
         qty = max_exposure
     
@@ -906,26 +844,24 @@ def main():
     # Header
     st.markdown("""
     <div style="text-align:center;padding:20px">
-        <h1>🎯 SNIPER V8.0 - PRICE ACTION ELITE</h1>
-        <p style="color:#8899aa">Sistema Profesional | Scale-Out + Trailing + Multi-Filtros</p>
+        <h1>🎯 SNIPER V8.1 - PRICE ACTION ELITE</h1>
+        <p style="color:#8899aa">VERSIÓN CORREGIDA | Debugging Activo | Filtros Relajados</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Info box con mejoras
+    # Info box
     st.markdown(f"""
     <div class="info-box">
-        <b>✅ MEJORAS V8.0:</b> 
-        Scale-Out (50% en TP1) | Trailing Agresivo | Filtro Noticias | 
-        Filtro Volatilidad | Multi-Timeframe | Límite 3 pérdidas consecutivas |
-        Riesgo 1% por trade | Máximo 5 trades/día
+        <b>✅ CAMBIOS V8.1:</b> 
+        NewsFilter DESACTIVADO | VolatilityFilter DESACTIVADO | Score Base 4.0 | 
+        Máx 3 posiciones | 10 trades/día | Debugging detallado en logs
     </div>
     """, unsafe_allow_html=True)
     
     st.markdown("""
     <div class="warning-box">
-        ⚠️ <b>ADVERTENCIA:</b> Ninguna estrategia es 100% ganadora. 
-        Este sistema maximiza probabilidades pero LAS PÉRDIDAS SON PARTE DEL TRADING.
-        Opera solo con capital que puedas perder.
+        ⚠️ <b>ADVERTENCIA:</b> Versión de prueba con filtros relajados. 
+        Monitorea el comportamiento antes de confiar plenamente.
     </div>
     """, unsafe_allow_html=True)
     
@@ -939,7 +875,7 @@ def main():
         st.markdown("---")
         
         leverage_ui = st.slider("Apalancamiento", 2, 25, Config.LEVERAGE_DEFAULT)
-        risk_pct_ui = st.slider("Riesgo por trade (%)", 0.5, 3.0, 1.0, 0.1)
+        risk_pct_ui = st.slider("Riesgo por trade (%)", 0.5, 5.0, 1.0, 0.5)
         Config.RISK_PCT_DEFAULT = risk_pct_ui / 100
         
         modo = st.radio("Modo:", ["Solo Análisis (Paper)", "Trading Real"], index=0)
@@ -971,15 +907,13 @@ def main():
         st.markdown("### 🚫 Estado de Filtros")
         
         news_blocked, news_reason = MarketFilters.check_prohibited_hours()
-        st.markdown(f"**Noticias:** {'🔴 BLOQUEADO' if news_blocked else '🟢 OK'}")
-        if news_blocked:
-            st.caption(f"Razón: {news_reason}")
+        st.markdown(f"**Noticias:** {'🔴 BLOQUEADO' if news_blocked else '🟢 DESACTIVADO'}")
         
         equity = get_equity()
         daily_ok, daily_reason = MarketFilters.check_daily_limits()
-        st.markdown(f"**Límites Diarios:** {'🟢 OK' if daily_ok else '🔴 BLOQUEADO'}")
-        if not daily_ok:
-            st.caption(f"Razón: {daily_reason}")
+        st.markdown(f"**Límites:** {'🟢 OK' if daily_ok else '🔴 ' + daily_reason}")
+        
+        st.markdown(f"**Trades Hoy:** {st.session_state.daily_trades}/{Config.MAX_DAILY_TRADES}")
     
     # Layout principal
     col1, col2, col3 = st.columns([2, 2, 3])
@@ -1000,29 +934,29 @@ def main():
                 'options': {'defaultType': 'future'}
             })
             
-            logger.log("SNIPER V8.0 ACTIVADO", "SYSTEM")
+            logger.log("=" * 50, "SYSTEM")
+            logger.log("SNIPER V8.1 INICIADO - Debugging Activo", "SYSTEM")
+            logger.log("=" * 50, "SYSTEM")
             
             # Obtener equity
             try:
                 balance = exchange.fetch_balance()
                 equity = safe_float(balance.get('total', {}).get('USD', 0))
+                if equity == 0:
+                    equity = safe_float(balance.get('free', {}).get('USD', 0))
                 set_equity(equity)
-            except:
+                logger.log(f"Equity detectado: ${equity:.2f}", "SYSTEM")
+            except Exception as e:
                 equity = get_equity()
+                logger.log(f"Error leyendo balance: {str(e)[:50]}", "ERROR")
             
             # Verificar filtros
             news_blocked, news_reason = MarketFilters.check_prohibited_hours()
             daily_ok, daily_reason = MarketFilters.check_daily_limits()
             
-            if news_blocked:
-                logger.log(f"Trading PAUSADO: {news_reason}", "PAUSE")
-                st.session_state.trading_paused = True
-                st.session_state.pause_reason = news_reason
-            else:
-                st.session_state.trading_paused = False
-                st.session_state.pause_reason = ""
+            logger.log(f"Estado filtros: News={news_blocked}, Daily={daily_ok}, Equity={equity:.2f}", "DEBUG")
             
-            # Actualizar UI
+            # Actualizar UI Capital
             stats = st.session_state.trade_stats
             win_rate = stats['wins'] / (stats['wins'] + stats['losses']) * 100 if (stats['wins'] + stats['losses']) > 0 else 0
             expectancy = calculate_expectancy()
@@ -1039,11 +973,14 @@ def main():
             """, unsafe_allow_html=True)
             
             # Gestionar posiciones
+            n_activas = 0
             try:
                 posiciones = exchange.fetch_positions()
                 n_activas = gestionar_posiciones_v8(posiciones, exchange, logger)
-            except:
+                logger.log(f"Posiciones activas gestionadas: {n_activas}", "DEBUG")
+            except Exception as e:
                 posiciones, n_activas = [], 0
+                logger.log(f"Error fetch_positions: {str(e)[:60]}", "ERROR")
             
             # UI Posiciones
             pos_html = ""
@@ -1077,69 +1014,112 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             
-            # Generar señales (solo si no está pausado)
+            # Generar señales
             senales_encontradas = []
             current_time = time.time()
+            
+            # DEBUG: Mostrar estado de can_trade
             can_trade = daily_ok and not news_blocked and n_activas < Config.MAX_POSITIONS and modo == "Trading Real"
             
+            logger.log(f"Can trade check: daily={daily_ok}, news={not news_blocked}, pos={n_activas < Config.MAX_POSITIONS}, modo={modo == 'Trading Real'}", "DEBUG")
+            logger.log(f"Resultado can_trade: {can_trade}", "DEBUG")
+            
+            if not daily_ok:
+                logger.log(f"Bloqueado - Daily limits: {daily_reason}", "FILTER")
+            if news_blocked:
+                logger.log(f"Bloqueado - News: {news_reason}", "FILTER")
+            if n_activas >= Config.MAX_POSITIONS:
+                logger.log(f"Bloqueado - Max posiciones: {n_activas}/{Config.MAX_POSITIONS}", "FILTER")
+            if modo != "Trading Real":
+                logger.log(f"Modo actual: {modo} (selecciona 'Trading Real' para operar)", "WARN")
+            
             if can_trade:
+                logger.log("✅ CONDICIONES OK - Buscando señales...", "SYSTEM")
+                
                 for symbol, config in Config.SYMBOLS.items():
                     last_sig = st.session_state.last_signal_time.get(symbol, 0)
-                    if current_time - last_sig < 300:
+                    time_since_last = current_time - last_sig
+                    
+                    if time_since_last < 60:
+                        logger.log(f"{symbol}: Esperando {60 - int(time_since_last)}s (cooldown)", "DEBUG")
                         continue
                     
                     # Verificar correlación
                     corr_ok, corr_msg = MarketFilters.check_correlation(symbol, st.session_state.active_trades)
                     if not corr_ok:
+                        logger.log(f"{symbol}: Bloqueado por correlación - {corr_msg}", "FILTER")
                         continue
                     
                     try:
+                        logger.log(f"Descargando datos {symbol}...", "DEBUG")
+                        
                         bars_15m = exchange.fetch_ohlcv(symbol, Config.TIMEFRAME_ENTRY, limit=Config.BARS_LIMIT)
                         bars_1h = exchange.fetch_ohlcv(symbol, Config.TIMEFRAME_TREND, limit=Config.BARS_LIMIT)
                         bars_4h = exchange.fetch_ohlcv(symbol, Config.TIMEFRAME_HIGH, limit=Config.BARS_LIMIT)
+                        
+                        logger.log(f"{symbol}: Datos descargados - 15m:{len(bars_15m)}, 1h:{len(bars_1h)}, 4h:{len(bars_4h)}", "DEBUG")
+                        
+                        if len(bars_15m) < 50:
+                            logger.log(f"{symbol}: Datos 15m insuficientes", "WARN")
+                            continue
                         
                         df_15m = pd.DataFrame(bars_15m, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
                         df_1h = pd.DataFrame(bars_1h, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
                         df_4h = pd.DataFrame(bars_4h, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
                         
-                        senal = signal_gen.generar_senal_premium(df_15m, df_1h, df_15m, df_4h, symbol)
+                        senal = signal_gen.generar_senal_premium(df_15m, df_1h, df_4h, symbol, logger)
                         
                         if senal and equity > 10:
                             senales_encontradas.append(senal)
                             
                             qty = calcular_posicion_v8(equity, senal['entry'], senal['sl'], leverage_ui, config)
+                            logger.log(f"{symbol}: Calculado tamaño {qty} (equity:${equity:.2f})", "DEBUG")
                             
                             if qty > 0:
-                                side_order = 'buy' if senal['side'] == 'long' else 'sell'
-                                exchange.create_order(
-                                    symbol=symbol, type='market', side=side_order, 
-                                    amount=qty, params={'leverage': leverage_ui}
-                                )
-                                
-                                st.session_state.active_trades[symbol] = {
-                                    'entry': senal['entry'],
-                                    'sl_current': senal['sl'],
-                                    'tp_current': senal['tp'],
-                                    'trailing_active': False,
-                                    'breakeven_reached': False,
-                                    'entry_risk': abs(senal['entry'] - senal['sl']) / senal['entry'],
-                                    'atr': senal['atr'],
-                                    'side': senal['side'].upper(),
-                                    'original_qty': qty,
-                                    'current_qty': qty,
-                                    'scale_out_done': False
-                                }
-                                
-                                st.session_state.last_signal_time[symbol] = current_time
-                                logger.log(f"ORDEN: {senal['side'].upper()} {symbol.split('/')[0]} @ {senal['entry']:.4f}", "TRADE")
-                                st.session_state.daily_trades += 1
-                                n_activas += 1
-                                
-                                if n_activas >= Config.MAX_POSITIONS:
-                                    break
+                                try:
+                                    side_order = 'buy' if senal['side'] == 'long' else 'sell'
+                                    order = exchange.create_order(
+                                        symbol=symbol, type='market', side=side_order, 
+                                        amount=qty, params={'leverage': leverage_ui}
+                                    )
+                                    
+                                    st.session_state.active_trades[symbol] = {
+                                        'entry': senal['entry'],
+                                        'sl_current': senal['sl'],
+                                        'tp_current': senal['tp'],
+                                        'trailing_active': False,
+                                        'breakeven_reached': False,
+                                        'entry_risk': abs(senal['entry'] - senal['sl']) / senal['entry'],
+                                        'atr': senal['atr'],
+                                        'side': senal['side'].upper(),
+                                        'original_qty': qty,
+                                        'current_qty': qty,
+                                        'scale_out_done': False
+                                    }
+                                    
+                                    st.session_state.last_signal_time[symbol] = current_time
+                                    logger.log(f"✅ ORDEN EJECUTADA: {senal['side'].upper()} {symbol} @ {senal['entry']:.4f} | Qty:{qty}", "TRADE")
+                                    st.session_state.daily_trades += 1
+                                    n_activas += 1
+                                    
+                                    if n_activas >= Config.MAX_POSITIONS:
+                                        logger.log("Máximo de posiciones alcanzado, deteniendo búsqueda", "SYSTEM")
+                                        break
+                                except Exception as e:
+                                    logger.log(f"❌ Error ejecutando orden {symbol}: {str(e)[:80]}", "ERROR")
+                            else:
+                                logger.log(f"{symbol}: Tamaño calculado = 0, saltando", "WARN")
+                        elif not senal:
+                            logger.log(f"{symbol}: No se generó señal", "DEBUG")
+                        elif equity <= 10:
+                            logger.log(f"{symbol}: Equity insuficiente (${equity:.2f})", "WARN")
                     
                     except Exception as e:
-                        logger.log(f"Error en {symbol}: {str(e)[:40]}", "WARN")
+                        logger.log(f"Error procesando {symbol}: {str(e)[:80]}", "ERROR")
+                        import traceback
+                        logger.log(traceback.format_exc()[:150], "ERROR")
+            else:
+                logger.log("⏸️ No se buscan señales - condiciones no cumplidas", "PAUSE")
             
             # UI Señales
             senales_html = ""
@@ -1155,15 +1135,15 @@ def main():
             
             senal_ph.markdown(f"""
             <div class="metric-card">
-                <b>🎯 Señales</b><br>
-                {senales_html if senales_html else '<small style="color:#667799">Escaneando...</small>'}
+                <b>🎯 Señales ({len(senales_encontradas)} encontradas)</b><br>
+                {senales_html if senales_html else '<small style="color:#667799">Escaneando mercado...</small>'}
             </div>
             """, unsafe_allow_html=True)
             
             # Logs
-            log_html = "<br>".join([f'<div class="log-entry">{l}</div>' for l in logger.get_logs(25)])
+            log_html = "<br>".join([f'<div class="log-entry">{l}</div>' for l in logger.get_logs(30)])
             log_ph.markdown(f"""
-            <div class="metric-card" style="max-height:220px;overflow-y:auto">
+            <div class="metric-card" style="max-height:300px;overflow-y:auto">
                 {log_html if log_html else '<small style="color:#667799">Sin logs</small>'}
             </div>
             """, unsafe_allow_html=True)
@@ -1180,28 +1160,25 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             
-            # Mostrar estado de pausa si aplica
-            if st.session_state.trading_paused:
-                st.markdown(f"""
-                <div class="warning-box">
-                    ⏸️ <b>TRADING PAUSADO:</b> {st.session_state.pause_reason}
-                </div>
-                """, unsafe_allow_html=True)
-            
+            logger.log(f"Ciclo completado. Próximo en {Config.RATE_LIMIT_DELAY}s", "DEBUG")
             time.sleep(Config.RATE_LIMIT_DELAY)
             st.rerun()
             
         except Exception as e:
-            st.error(f"❌ Error: {e}")
-            logger.log(f"ERROR: {str(e)[:100]}", "ERROR")
+            st.error(f"❌ Error crítico: {e}")
+            logger.log(f"ERROR CRÍTICO: {str(e)[:150]}", "ERROR")
+            import traceback
+            logger.log(traceback.format_exc()[:300], "ERROR")
             time.sleep(10)
             st.rerun()
     
     else:
         if not activar:
-            st.info("👈 Ingresa credenciales y activa el sistema")
+            st.info("👈 Ingresa credenciales, selecciona 'Trading Real' y activa el sistema")
+        elif not api_key or not api_secret:
+            st.error("❌ API Key y Secret requeridos")
         else:
-            st.error("❌ Credenciales requeridas")
+            st.info("Sistema listo. Activa el toggle 'INICIAR' para comenzar.")
 
 if __name__ == "__main__":
     main()
