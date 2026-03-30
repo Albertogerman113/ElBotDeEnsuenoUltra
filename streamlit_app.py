@@ -188,6 +188,11 @@ def init_session_state():
     for key, default in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = default
+        elif isinstance(default, dict) and isinstance(st.session_state[key], dict):
+            # MIGRACIÓN: Agregar keys faltantes a dicts existentes (ej: upgrade V8→V9)
+            for sub_key, sub_default in default.items():
+                if sub_key not in st.session_state[key]:
+                    st.session_state[key][sub_key] = sub_default
 
 # ============================================================================
 # GESTOR DE LOGS
@@ -745,8 +750,8 @@ def gestionar_posiciones_v9(posiciones: List[Dict], exchange, logger: LogManager
                     stats['consecutive_wins'] = 0
                     stats['max_consecutive_losses'] = max(stats['max_consecutive_losses'], stats['consecutive_losses'])
                 
-                if stats['net_pnl'] < stats['max_drawdown']:
-                    stats['max_drawdown'] = stats['net_pnl']
+                if stats.get('net_pnl', 0.0) < stats.get('max_drawdown', 0.0):
+                    stats['max_drawdown'] = stats.get('net_pnl', 0.0)
                 
                 st.session_state.daily_pnl += net_pnl
                 st.session_state.weekly_pnl += net_pnl
@@ -1326,8 +1331,8 @@ def main():
         st.markdown(f"**Equity:** ${equity:.4f}")
         st.markdown(f"**Trades Hoy:** {st.session_state.daily_trades}/{Config.MAX_DAILY_TRADES}")
         st.markdown(f"**Posiciones:** {len(st.session_state.active_trades)}/{Config.MAX_POSITIONS}")
-        st.markdown(f"**PnL Neto:** ${stats['net_pnl']:+.4f}")
-        st.markdown(f"**Fees pagados:** ${stats['total_fees_paid']:.4f}")
+        st.markdown(f"**PnL Neto:** ${stats.get('net_pnl', 0.0):+.4f}")
+        st.markdown(f"**Fees pagados:** ${stats.get('total_fees_paid', 0.0):.4f}")
         
         if stats['consecutive_losses'] >= 3:
             st.markdown(f"⚠️ **{stats['consecutive_losses']} pérdidas seguidas**")
@@ -1385,7 +1390,7 @@ def main():
             # UI Capital
             stats = st.session_state.trade_stats
             net_wr = get_net_win_rate()
-            net_pnl = stats['net_pnl']
+            net_pnl = stats.get('net_pnl', stats.get('total_pnl', 0.0))
             
             pnl_color = '#00ff88' if net_pnl >= 0 else '#ff4466'
             equity_color = '#ff4466' if equity < 5 else '#4a9eff'
@@ -1396,7 +1401,7 @@ def main():
                 <span style="font-size:1.8em;color:{equity_color};font-weight:700">${equity:.4f}</span><br>
                 <small style="color:#8899aa">
                     W:{stats['wins']} L:{stats['losses']} | WR:{net_wr:.1f}%<br>
-                    <span style="color:{pnl_color}">Neto: ${net_pnl:+.4f} | Fees: ${stats['total_fees_paid']:.4f}</span>
+                    <span style="color:{pnl_color}">Neto: ${net_pnl:+.4f} | Fees: ${stats.get('total_fees_paid', 0.0):.4f}</span>
                 </small>
             </div>
             """, unsafe_allow_html=True)
@@ -1630,10 +1635,10 @@ def main():
                 <small style="color:#8899aa">
                     <b>PF:</b> {pf:.2f} | 
                     <b>Exp:</b> ${exp:+.4f}/trade | 
-                    <b>DD Max:</b> ${stats['max_drawdown']:+.4f}<br>
-                    <b>Win Avg:</b> ${stats['avg_win']:.4f} | 
-                    <b>Loss Avg:</b> ${stats['avg_loss']:.4f} | 
-                    <b>Total Fees:</b> ${stats['total_fees_paid']:.4f}<br>
+                    <b>DD Max:</b> ${stats.get('max_drawdown', 0.0):+.4f}<br>
+                    <b>Win Avg:</b> ${stats.get('avg_win', 0.0):.4f} | 
+                    <b>Loss Avg:</b> ${stats.get('avg_loss', 0.0):.4f} | 
+                    <b>Total Fees:</b> ${stats.get('total_fees_paid', 0.0):.4f}<br>
                     <b>Win Streak:</b> {stats['max_consecutive_wins']} | 
                     <b>Loss Streak:</b> {stats['max_consecutive_losses']} | 
                     <b>Trades:</b> {stats['total_trades']}
