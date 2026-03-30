@@ -429,97 +429,134 @@ def calc_pos(eq, price, sl, lev, scfg, pcfg, log):
 def manage_pos(pos, ex, log, pcfg):
     n=0
     for p in pos:
-        qty=sf(p.get('contracts',0))
-        if qty<=0: continue
-        n+=1
-        sym=p['symbol']; side=p['side'].upper()
-        mark=sf(p.get('markPrice')); pnl=sf(p.get('unrealizedPnl')); entry=sf(p.get('entryPrice'))
-        if sym not in st.session_state.active_trades:
-            # ATR mínimo: 0.5% del precio como floor (nunca menos)
-            ea = max(abs(mark-entry)*0.5, entry*0.005) if entry>0 and mark>0 else entry*0.01
-            sd = ea * 1.5
-            sl = entry - sd if side=='LONG' else entry + sd
-            td = sd * pcfg['rr_ratio']
-            tp = entry + td if side=='LONG' else entry - td
+        try:
+            qty=sf(p.get('contracts',0))
+            if qty<=0: continue
+            n+=1
+            sym=p['symbol']; side=p['side'].upper()
+            mark=sf(p.get('markPrice')); pnl=sf(p.get('unrealizedPnl')); entry=sf(p.get('entryPrice'))
+            if entry<=0 or mark<=0:
+                log.log(f"{sym}: entry/mark inválido (e={entry} m={mark})", "WARN")
+                continue
             
-            # PROTECCIÓN: TP debe estar a suficiente distancia para cubrir fees
-            # Fees = 0.1% round trip → necesitamos al menos 0.2% de ganancia para ser rentable
-            min_tp_dist = entry * 0.003  # Mínimo 0.3%
-            if side=='LONG' and (tp - entry) < min_tp_dist:
-                tp = entry + min_tp_dist
-            elif side=='SHORT' and (entry - tp) < min_tp_dist:
-                tp = entry - min_tp_dist
+            # --- Registrar posición nueva si no existe en active_trades ---
+            if sym not in st.session_state.active_trades:
+                # ATR estimado: % del precio. Floor 0.5% para que SL/TP tengan sentido.
+                move_pct = abs(mark - entry) / entry  # puede ser ~0 si acaba de abrir
+                atr_pct = max(move_pct * 0.5, 0.005)  # mínimo 0.5%
+                
+                sl_dist = atr_pct * 1.5  # SL a 0.75% mínimo
+                sl = entry * (1 - sl_dist) if side=='LONG' else entry * (1 + sl_dist)
+                tp_dist = sl_dist * pcfg['rr_ratio']
+                tp = entry * (1 + tp_dist) if side=='LONG' else entry * (1 - tp_dist)
+                
+                # TP mínimo 0.3% para cubrir fees (0.1% round trip)
+                if side=='LONG' and tp < entry * 1.003: tp = entry * 1.003
+                elif side=='SHORT' and tp > entry * 0.997: tp = entry * 0.997
+                
+                risk_pct = abs(entry - sl) / entry  # siempre ≥ 0.0075
+                
+                log.log(f"New pos: {sym} {side} @ {entry:.2f} | SL:{sl:.2f} TP:{tp:.2f} | R:{risk_pct*100:.2f}%", "SYSTEM")
+                st.session_state.active_trades[sym]={
+                    'entry':entry,'sl':sl,'tp':tp,'trail':False,'be':False,
+                    'risk':risk_pct,'side':side,
+                    'oqty':qty,'cqty':qty,'hi':mark,'lo':mark,'mfe':0.0,
+                    'opened':datetime.now(timezone.utc),'atr_pct':atr_pct
+                }
             
-            log.log(f"New pos: {sym} {side} @ {entry:.2f} | SL:{sl:.2f} TP:{tp:.2f} | Dist:{(tp-entry)/entry*100:.2f}%", "SYSTEM")
-            st.session_state.active_trades[sym]={
-                'entry':entry,'sl':sl,'tp':tp,'trail':False,'be':False,
-                'risk':abs(entry-sl)/entry if entry>0 else 0.015,'side':side,
-                'oqty':qty,'cqty':qty,'hi':mark,'lo':mark,'mfe':0.0,
-                'opened':datetime.now(timezone.utc),'atr':ea
-            }
-        tr=st.session_state.active_trades[sym]
-        if side=='LONG':
-            tr['hi']=max(tr['hi'],mark); tr['mfe']=max(tr['mfe'],(mark-entry)/entry)
-        else:
-            tr['lo']=min(tr['lo'],mark); tr['mfe']=max(tr['mfe'],(entry-mark)/entry)
-        cs='sell' if side=='LONG' else 'buy'
-        is_tp=(side=='LONG' and mark>=tr['tp']) or (side=='SHORT' and mark<=tr['tp'])
-        is_sl=(side=='LONG' and mark<=tr['sl']) or (side=='SHORT' and mark>=tr['sl'])
-        # PROTECCIÓN: No trigger TP si el neto sería negativo (fees > ganancia)
-        notional_est = tr['cqty'] * entry
-        fees_est = est_fees(notional_est)
-        is_tp_real = is_tp and (pnl > fees_est * 1.1)
-        if is_tp_real or is_sl:
-            try:
-                ex.create_order(symbol=sym,type='market',side=cs,amount=tr['cqty'],params={'reduceOnly':True})
-                notional=tr['cqty']*entry; fees=est_fees(notional); net=pnl-fees
-                s=st.session_state.trade_stats
-                s['total_pnl']+=pnl; s['total_fees_paid']+=fees; s['net_pnl']+=net; s['total_trades']+=1
-                dur=(datetime.now(timezone.utc)-tr.get('opened',datetime.now(timezone.utc))).total_seconds()/60
-                if is_tp_real:
-                    s['wins']+=1; w=s['wins']
-                    s['avg_win']=(s['avg_win']*(w-1)+net)/w if w>0 else net
-                    s['largest_win']=max(s['largest_win'],net)
-                    s['consecutive_wins']+=1; s['consecutive_losses']=0
-                    s['max_consecutive_wins']=max(s['max_consecutive_wins'],s['consecutive_wins'])
-                    log.log(f"✅ TP: {sym} Net ${net:+.4f} Fees ${fees:.4f} {dur:.0f}m", "WIN")
-                else:
-                    s['losses']+=1; lc=s['losses']
-                    s['avg_loss']=(s['avg_loss']*(lc-1)+abs(net))/lc if lc>0 else abs(net)
-                    s['largest_loss']=max(s['largest_loss'],abs(net))
-                    s['consecutive_losses']+=1; s['consecutive_wins']=0
-                    s['max_consecutive_losses']=max(s['max_consecutive_losses'],s['consecutive_losses'])
-                    log.log(f"💀 SL: {sym} Net ${net:+.4f} MFE {tr['mfe']*100:.1f}%", "LOSS")
-                if s.get('net_pnl',0)<s.get('max_drawdown',0): s['max_drawdown']=s.get('net_pnl',0)
-                st.session_state.daily_pnl+=net; st.session_state.weekly_pnl+=net
-                if s['avg_loss']>0: s['profit_factor']=s['avg_win']/s['avg_loss']
-                else: s['profit_factor']=999.0 if s['wins']>0 else 0.0
-                del st.session_state.active_trades[sym]
-            except Exception as e:
-                log.log(f"Err close: {str(e)[:60]}", "ERROR")
-            continue
-        # TRAILING AGRESIVO
-        # Floor para entry_risk: mínimo 0.005 (0.5%) para evitar R absurdos
-        entry_risk = max(tr['risk'], entry * 0.005)
-        rm = abs(mark-entry)/entry_risk
-        
-        if not tr['be'] and rm >= 0.8:
-            tr['sl'] = entry*(1.001 if side=='LONG' else 0.999)
-            tr['be'] = True
-            log.log(f"{sym}: BE @ {rm:.1f}R", "RISK")
-        elif tr['be'] and not tr['trail'] and rm >= 1.2:
-            tr['trail'] = True
-            tr['ts'] = mark
-            log.log(f"{sym}: Trail @ {rm:.1f}R", "RISK")
-        elif tr.get('trail'):
-            at = tr.get('atr', entry_risk*entry)
-            td = at * 0.4
+            tr = st.session_state.active_trades[sym]
+            
+            # --- Actualizar MFE ---
             if side=='LONG':
-                if mark > tr.get('ts', mark): tr['ts'] = mark
-                tr['sl'] = max(tr['sl'], mark-td)
+                tr['hi'] = max(tr.get('hi', mark), mark)
+                tr['mfe'] = max(tr.get('mfe', 0), (mark - entry) / entry)
             else:
-                if mark < tr.get('ts', mark): tr['ts'] = mark
-                tr['sl'] = min(tr['sl'], mark+td)
+                tr['lo'] = min(tr.get('lo', mark), mark)
+                tr['mfe'] = max(tr.get('mfe', 0), (entry - mark) / entry)
+            
+            # --- TP / SL check ---
+            cs = 'sell' if side=='LONG' else 'buy'
+            is_tp = (side=='LONG' and mark >= tr['tp']) or (side=='SHORT' and mark <= tr['tp'])
+            is_sl = (side=='LONG' and mark <= tr['sl']) or (side=='SHORT' and mark >= tr['sl'])
+            
+            # Protección: no cerrar por TP si net sería negativo (fees > ganancia)
+            notional_est = tr.get('cqty', qty) * entry
+            fees_est = est_fees(notional_est)
+            is_tp_real = is_tp and (pnl > fees_est * 1.1)
+            
+            if is_tp_real or is_sl:
+                try:
+                    ex.create_order(symbol=sym, type='market', side=cs, amount=tr.get('cqty', qty), params={'reduceOnly':True})
+                    notional = tr.get('cqty', qty) * entry
+                    fees = est_fees(notional)
+                    net = pnl - fees
+                    s = st.session_state.trade_stats
+                    s['total_pnl'] = s.get('total_pnl',0) + pnl
+                    s['total_fees_paid'] = s.get('total_fees_paid',0) + fees
+                    s['net_pnl'] = s.get('net_pnl',0) + net
+                    s['total_trades'] = s.get('total_trades',0) + 1
+                    dur = (datetime.now(timezone.utc) - tr.get('opened', datetime.now(timezone.utc))).total_seconds() / 60
+                    
+                    if is_tp_real:
+                        s['wins'] = s.get('wins',0) + 1; w = s['wins']
+                        s['avg_win'] = (s.get('avg_win',0)*(w-1)+net)/w if w>0 else net
+                        s['largest_win'] = max(s.get('largest_win',0), net)
+                        s['consecutive_wins'] = s.get('consecutive_wins',0) + 1
+                        s['consecutive_losses'] = 0
+                        s['max_consecutive_wins'] = max(s.get('max_consecutive_wins',0), s['consecutive_wins'])
+                        log.log(f"✅ TP: {sym} Net ${net:+.4f} Fees ${fees:.4f} {dur:.0f}m", "WIN")
+                    else:
+                        s['losses'] = s.get('losses',0) + 1; lc = s['losses']
+                        s['avg_loss'] = (s.get('avg_loss',0)*(lc-1)+abs(net))/lc if lc>0 else abs(net)
+                        s['largest_loss'] = max(s.get('largest_loss',0), abs(net))
+                        s['consecutive_losses'] = s.get('consecutive_losses',0) + 1
+                        s['consecutive_wins'] = 0
+                        s['max_consecutive_losses'] = max(s.get('max_consecutive_losses',0), s['consecutive_losses'])
+                        log.log(f"💀 SL: {sym} Net ${net:+.4f} MFE {tr.get('mfe',0)*100:.1f}%", "LOSS")
+                    
+                    if s.get('net_pnl',0) < s.get('max_drawdown',0): s['max_drawdown'] = s.get('net_pnl',0)
+                    st.session_state.daily_pnl = st.session_state.get('daily_pnl',0) + net
+                    st.session_state.weekly_pnl = st.session_state.get('weekly_pnl',0) + net
+                    if s.get('avg_loss',0) > 0: s['profit_factor'] = s.get('avg_win',0) / s['avg_loss']
+                    else: s['profit_factor'] = 999.0 if s.get('wins',0) > 0 else 0.0
+                    
+                    if sym in st.session_state.active_trades:
+                        del st.session_state.active_trades[sym]
+                except Exception as e:
+                    log.log(f"Err close: {str(e)[:60]}", "ERROR")
+                continue
+            
+            # --- TRAILING STOP ---
+            # R-multiple: (ganancia % real) / (riesgo % al entrar)
+            # AMBOS como porcentaje, SIN mezclar unidades
+            entry_risk_pct = max(tr.get('risk', 0.0075), 0.005)  # floor 0.5%
+            move_pct_real = abs(mark - entry) / entry  # % que se movió el precio
+            rm = move_pct_real / entry_risk_pct  # R-multiple correcto
+            
+            if not tr.get('be', False) and rm >= 0.8:
+                tr['sl'] = entry * (1.001 if side=='LONG' else 0.999)
+                tr['be'] = True
+                log.log(f"{sym}: BE @ {rm:.1f}R", "RISK")
+            elif tr.get('be', False) and not tr.get('trail', False) and rm >= 1.2:
+                tr['trail'] = True
+                tr['ts'] = mark
+                log.log(f"{sym}: Trail ON @ {rm:.1f}R", "RISK")
+            elif tr.get('trail', False):
+                # Trail distance: ATR% * 0.4 convertido a precio
+                atr_pct_val = tr.get('atr_pct', entry_risk_pct)
+                trail_dist = entry * atr_pct_val * 0.4  # en dólares
+                if side=='LONG':
+                    if mark > tr.get('ts', mark): tr['ts'] = mark
+                    new_sl = mark - trail_dist
+                    if new_sl > tr.get('sl', entry): tr['sl'] = new_sl
+                else:
+                    if mark < tr.get('ts', mark): tr['ts'] = mark
+                    new_sl = mark + trail_dist
+                    if new_sl < tr.get('sl', entry): tr['sl'] = new_sl
+        
+        except Exception as e:
+            log.log(f"Pos err: {str(e)[:80]}", "ERROR")
+    
     return n
 
 # ============================================================================
@@ -692,7 +729,7 @@ def main():
                 n_act=manage_pos(positions,ex,log,pc)
             except Exception as e:
                 positions,n_act=[],0
-                log.log(f"Pos err: {str(e)[:50]}", "ERROR")
+                log.log(f"Fetch pos err: {str(e)[:60]}", "ERROR")
             
             pos_html=""
             for p in positions:
@@ -747,9 +784,11 @@ def main():
                                 notional=qty*sig['entry']; fees=est_fees(notional)
                                 log.log(f"📦 {so} {qty} {symbol} N:${notional:.2f} Fees:${fees:.4f}","TRADE")
                                 ex.create_order(symbol=symbol,type='market',side=so,amount=qty,params={'leverage':pc['leverage']})
+                                atr_pct_sig = sig['atr']/sig['entry'] if sig['entry']>0 and sig['atr']>0 else 0.005
                                 st.session_state.active_trades[symbol]={
                                     'entry':sig['entry'],'sl':sig['sl'],'tp':sig['tp'],'trail':False,'be':False,
-                                    'risk':abs(sig['entry']-sig['sl'])/sig['entry'],'atr':sig['atr'],
+                                    'risk':abs(sig['entry']-sig['sl'])/sig['entry'],
+                                    'atr_pct':max(atr_pct_sig, 0.005),
                                     'side':sig['side'].upper(),'oqty':qty,'cqty':qty,
                                     'hi':sig['entry'],'lo':sig['entry'],'mfe':0.0,
                                     'opened':datetime.now(timezone.utc),'score':sig['score'],'razones':sig['razones']
