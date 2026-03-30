@@ -106,8 +106,8 @@ class Phases:
         return Phases.PHASES[p]
 
 SYMBOLS_CFG = {
-    'BTC/USD:USD': {'min_size': 0.00001, 'tick_size': 0.5},
-    'ETH/USD:USD': {'min_size': 0.0001, 'tick_size': 0.05},
+    'BTC/USD:USD': {'min_size': 0.00001, 'tick_size': 0.00001},
+    'ETH/USD:USD': {'min_size': 0.0001, 'tick_size': 0.0001},
     'SOL/USD:USD': {'min_size': 0.001, 'tick_size': 0.001}
 }
 
@@ -401,11 +401,15 @@ def calc_pos(eq, price, sl, lev, scfg, pcfg, log):
     notional = risk_usd / denom
     qty = notional / price
     ms = scfg.get('min_size', 0.0001)
+    log.log(f"Calc: eq=${eq:.2f} risk=${risk_usd:.4f} dsl={dsl:.4f} notional=${notional:.2f} qty_raw={qty:.8f} min={ms}", "DEBUG")
     if qty < ms:
         mr = (ms*price)/lev
         mm = eq * pcfg['exposure_pct']
-        if mr <= mm: qty = ms; log.log(f"MinSize: {ms}", "WARN")
-        else: return 0
+        log.log(f"Qty < min. margin_req=${mr:.4f} max_margin=${mm:.4f}", "DEBUG")
+        if mr <= mm: qty = ms; log.log(f"Using min_size: {ms}", "WARN")
+        else: 
+            log.log(f"Cannot afford min_size margin ${mr:.4f} > ${mm:.4f}", "ERROR")
+            return 0
     mx = (eq*pcfg['exposure_pct']*lev)/price
     if qty > mx: qty = mx
     tick = scfg.get('tick_size', 0.01)
