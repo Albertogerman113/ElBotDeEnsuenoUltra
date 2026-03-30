@@ -246,8 +246,9 @@ class Ind:
     @staticmethod
     def ob(df):
         ob_b,ob_s=[],[]
-        c,o,v=df['c'].astype(float).values,df['o'].astype(float).values,df['v'].astype(float).values
-        vm=v.rolling(20).mean().values; pr=c[-1]
+        c,o=df['c'].astype(float).values,df['o'].astype(float).values
+        v=df['v'].astype(float).values
+        vm=df['v'].astype(float).rolling(20).mean().values; pr=c[-1]
         for i in range(5,len(df)-7):
             va=vm[i] if not np.isnan(vm[i]) else v[i]
             if o[i]>c[i]:
