@@ -434,9 +434,24 @@ def manage_pos(pos, ex, log, pcfg):
             if qty<=0: continue
             n+=1
             sym=p['symbol']; side=p['side'].upper()
-            mark=sf(p.get('markPrice')); pnl=sf(p.get('unrealizedPnl')); entry=sf(p.get('entryPrice'))
-            if entry<=0 or mark<=0:
-                log.log(f"{sym}: entry/mark inválido (e={entry} m={mark})", "WARN")
+            mark=sf(p.get('markPrice'))
+            if mark <= 0:
+                mark=sf(p.get('mark'))  # campo alternativo
+            if mark <= 0:
+                mark=sf(p.get('info',{}).get('markPrice'))  # raw response
+            pnl=sf(p.get('unrealizedPnl')); entry=sf(p.get('entryPrice'))
+            if entry<=0:
+                log.log(f"{sym}: entry inválido ({entry})", "WARN")
+                continue
+            if mark<=0:
+                # Último recurso: fetch ticker para obtener mark price
+                try:
+                    tk=ex.fetch_ticker(sym)
+                    mark=sf(tk.get('mark') if tk.get('mark') else tk.get('last',0))
+                except:
+                    pass
+            if mark<=0:
+                log.log(f"{sym}: markPrice=0, saltando (entry={entry:.2f})", "WARN")
                 continue
             
             # --- Registrar posición nueva si no existe en active_trades ---
@@ -736,7 +751,10 @@ def main():
                 qty=sf(p.get('contracts',0))
                 if qty<=0: continue
                 sym=p['symbol']; side=p['side'].upper()
-                mark=sf(p.get('markPrice')); entry=sf(p.get('entryPrice')); pnl=sf(p.get('unrealizedPnl'))
+                mark=sf(p.get('markPrice'))
+                if mark<=0: mark=sf(p.get('mark'))
+                if mark<=0: mark=sf(p.get('info',{}).get('markPrice'))
+                entry=sf(p.get('entryPrice')); pnl=sf(p.get('unrealizedPnl'))
                 tr=st.session_state.active_trades.get(sym,{})
                 sl=tr.get('sl',0); tp=tr.get('tp',0); mfe=tr.get('mfe',0)*100
                 cl="#00ff44" if pnl>=0 else "#ff2200"
