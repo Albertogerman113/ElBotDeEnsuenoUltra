@@ -499,21 +499,27 @@ def manage_pos(pos, ex, log, pcfg):
                 log.log(f"Err close: {str(e)[:60]}", "ERROR")
             continue
         # TRAILING AGRESIVO
-        if tr['risk']>0:
-            rm=abs(mark-entry)/tr['risk']
-            if not tr['be'] and rm>=0.8:
-                tr['sl']=entry*(1.001 if side=='LONG' else 0.999)
-                tr['be']=True; log.log(f"{sym}: BE @ {rm:.1f}R", "RISK")
-            elif tr['be'] and not tr['trail'] and rm>=1.2:
-                tr['trail']=True; tr['ts']=mark; log.log(f"{sym}: Trail @ {rm:.1f}R", "RISK")
-            elif tr.get('trail'):
-                at=tr.get('atr',tr['risk']*entry); td=at*0.4
-                if side=='LONG':
-                    if mark>tr.get('ts',mark): tr['ts']=mark
-                    tr['sl']=max(tr['sl'],mark-td)
-                else:
-                    if mark<tr.get('ts',mark): tr['ts']=mark
-                    tr['sl']=min(tr['sl'],mark+td)
+        # Floor para entry_risk: mínimo 0.005 (0.5%) para evitar R absurdos
+        entry_risk = max(tr['risk'], entry * 0.005)
+        rm = abs(mark-entry)/entry_risk
+        
+        if not tr['be'] and rm >= 0.8:
+            tr['sl'] = entry*(1.001 if side=='LONG' else 0.999)
+            tr['be'] = True
+            log.log(f"{sym}: BE @ {rm:.1f}R", "RISK")
+        elif tr['be'] and not tr['trail'] and rm >= 1.2:
+            tr['trail'] = True
+            tr['ts'] = mark
+            log.log(f"{sym}: Trail @ {rm:.1f}R", "RISK")
+        elif tr.get('trail'):
+            at = tr.get('atr', entry_risk*entry)
+            td = at * 0.4
+            if side=='LONG':
+                if mark > tr.get('ts', mark): tr['ts'] = mark
+                tr['sl'] = max(tr['sl'], mark-td)
+            else:
+                if mark < tr.get('ts', mark): tr['ts'] = mark
+                tr['sl'] = min(tr['sl'], mark+td)
     return n
 
 # ============================================================================
