@@ -435,32 +435,48 @@ def manage_pos(pos, ex, log, pcfg):
         sym=p['symbol']; side=p['side'].upper()
         mark=sf(p.get('markPrice')); pnl=sf(p.get('unrealizedPnl')); entry=sf(p.get('entryPrice'))
         if sym not in st.session_state.active_trades:
-            ea=abs(mark-entry)*0.5 if entry>0 and mark>0 else entry*0.01
-            sd=ea*1.5; sl=entry-sd if side=='LONG' else entry+sd
-            td=sd*pcfg['rr_ratio']; tp=entry+td if side=='LONG' else entry-td
+            # ATR mínimo: 0.5% del precio como floor (nunca menos)
+            ea = max(abs(mark-entry)*0.5, entry*0.005) if entry>0 and mark>0 else entry*0.01
+            sd = ea * 1.5
+            sl = entry - sd if side=='LONG' else entry + sd
+            td = sd * pcfg['rr_ratio']
+            tp = entry + td if side=='LONG' else entry - td
+            
+            # PROTECCIÓN: TP debe estar a suficiente distancia para cubrir fees
+            # Fees = 0.1% round trip → necesitamos al menos 0.2% de ganancia para ser rentable
+            min_tp_dist = entry * 0.003  # Mínimo 0.3%
+            if side=='LONG' and (tp - entry) < min_tp_dist:
+                tp = entry + min_tp_dist
+            elif side=='SHORT' and (entry - tp) < min_tp_dist:
+                tp = entry - min_tp_dist
+            
+            log.log(f"New pos: {sym} {side} @ {entry:.2f} | SL:{sl:.2f} TP:{tp:.2f} | Dist:{(tp-entry)/entry*100:.2f}%", "SYSTEM")
             st.session_state.active_trades[sym]={
                 'entry':entry,'sl':sl,'tp':tp,'trail':False,'be':False,
                 'risk':abs(entry-sl)/entry if entry>0 else 0.015,'side':side,
                 'oqty':qty,'cqty':qty,'hi':mark,'lo':mark,'mfe':0.0,
                 'opened':datetime.now(timezone.utc),'atr':ea
             }
-            log.log(f"Tracking: {sym} {side} @ {entry:.2f} | SL:{sl:.2f} TP:{tp:.2f}", "SYSTEM")
         tr=st.session_state.active_trades[sym]
         if side=='LONG':
             tr['hi']=max(tr['hi'],mark); tr['mfe']=max(tr['mfe'],(mark-entry)/entry)
         else:
             tr['lo']=min(tr['lo'],mark); tr['mfe']=max(tr['mfe'],(entry-mark)/entry)
         cs='sell' if side=='LONG' else 'buy'
-        is_tp=(side=='LONG' and mark>=tr['tp']) or (side=='SHORT' and mark<=tr['tp'])
+        # PROTECCIÓN: No trigger TP si el neto sería negativo (fees > ganancia)
+        notional_est = tr['cqty'] * entry
+        fees_est = est_fees(notional_est)
+        is_tp_real = is_tp and (pnl > fees_est * 1.1)  # Al menos 10% de ganancia sobre fees
+        
         is_sl=(side=='LONG' and mark<=tr['sl']) or (side=='SHORT' and mark>=tr['sl'])
-        if is_tp or is_sl:
+        if is_tp_real or is_sl:
             try:
                 ex.create_order(symbol=sym,type='market',side=cs,amount=tr['cqty'],params={'reduceOnly':True})
                 notional=tr['cqty']*entry; fees=est_fees(notional); net=pnl-fees
                 s=st.session_state.trade_stats
                 s['total_pnl']+=pnl; s['total_fees_paid']+=fees; s['net_pnl']+=net; s['total_trades']+=1
                 dur=(datetime.now(timezone.utc)-tr.get('opened',datetime.now(timezone.utc))).total_seconds()/60
-                if is_tp:
+                if is_tp_real:
                     s['wins']+=1; w=s['wins']
                     s['avg_win']=(s['avg_win']*(w-1)+net)/w if w>0 else net
                     s['largest_win']=max(s['largest_win'],net)
