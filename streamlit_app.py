@@ -633,12 +633,13 @@ def main():
             if ph==0:
                 log.log("🏆 ¡META! Deteniendo bot.", "MILESTONE")
                 s=st.session_state.trade_stats
-                wr=s['wins']/(s['wins']+s['losses'])*100 if (s['wins']+s['losses'])>0 else 0
+                sw=s.get('wins',0); sl2=s.get('losses',0)
+                wr=sw/(sw+sl2)*100 if (sw+sl2)>0 else 0
                 cap_ph.markdown(f"""
                 <div class="mc-green" style="text-align:center">
                     <b style="color:#00ffff;font-size:1.3em">🏆 ¡META ALCANZADA! 🏆</b><br>
                     <span style="font-size:2em;color:#00ff44;font-weight:700">${eq:.2f}</span><br>
-                    <small>Trades:{s['total_trades']} WR:{wr:.1f}% Neto:${s.get('net_pnl',0):+.2f}</small>
+                    <small>Trades:{s.get('total_trades',0)} WR:{wr:.1f}% Neto:{s.get('net_pnl',0):+.2f}</small>
                 </div>""",unsafe_allow_html=True)
                 time.sleep(60); st.rerun(); return
             
@@ -646,14 +647,15 @@ def main():
             
             # Capital UI
             s=st.session_state.trade_stats
-            wr=s['wins']/(s['wins']+s['losses'])*100 if (s['wins']+s['losses'])>0 else 0
+            sw=s.get('wins',0); sl2=s.get('losses',0)
+            wr=sw/(sw+sl2)*100 if (sw+sl2)>0 else 0
             net=s.get('net_pnl',s.get('total_pnl',0))
             nc='#00ff44' if net>=0 else '#ff2200'
             cap_ph.markdown(f"""
             <div class="mc">
                 <b>💰 Capital</b><br>
                 <span style="font-size:1.6em;color:{pc.get('color','#4a9eff')};font-weight:700">${eq:.4f}</span><br>
-                <small style="color:#8899aa">W:{s['wins']} L:{s['losses']} | WR:{wr:.0f}%<br>
+                <small style="color:#8899aa">W:{sw} L:{sl2} | WR:{wr:.0f}%<br>
                 <span style="color:{nc}">Neto: ${net:+.4f}</span></small>
             </div>""",unsafe_allow_html=True)
             
@@ -769,13 +771,14 @@ def main():
             
             # Stats
             pf=s.get('profit_factor',0)
-            ev=(wr/100*s['avg_win'])-((1-wr/100)*s['avg_loss']) if (s['wins']+s['losses'])>0 else 0
+            sw=s.get('wins',0); sl2=s.get('losses',0)
+            ev=(wr/100*s.get('avg_win',0))-((1-wr/100)*s.get('avg_loss',0)) if (sw+sl2)>0 else 0
             stat_ph.markdown(f"""
             <div class="mc" style="text-align:center">
                 <small style="color:#8899aa">
                     <b>PF:</b> {pf:.2f} | <b>Exp:</b> ${ev:+.4f}/t | <b>DD:</b> ${s.get('max_drawdown',0):+.4f}<br>
                     <b>Win:</b> ${s.get('avg_win',0):.4f} | <b>Loss:</b> ${s.get('avg_loss',0):.4f} | <b>Fees:</b> ${s.get('total_fees_paid',0):.4f}<br>
-                    <b>Streak W:</b> {s.get('max_consecutive_wins',0)} | <b>Streak L:</b> {s.get('max_consecutive_losses',0)} | <b>Total:</b> {s['total_trades']}
+                    <b>Streak W:</b> {s.get('max_consecutive_wins',0)} | <b>Streak L:</b> {s.get('max_consecutive_losses',0)} | <b>Total:</b> {s.get('total_trades',0)}
                 </small>
             </div>""",unsafe_allow_html=True)
             
