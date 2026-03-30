@@ -463,12 +463,12 @@ def manage_pos(pos, ex, log, pcfg):
         else:
             tr['lo']=min(tr['lo'],mark); tr['mfe']=max(tr['mfe'],(entry-mark)/entry)
         cs='sell' if side=='LONG' else 'buy'
+        is_tp=(side=='LONG' and mark>=tr['tp']) or (side=='SHORT' and mark<=tr['tp'])
+        is_sl=(side=='LONG' and mark<=tr['sl']) or (side=='SHORT' and mark>=tr['sl'])
         # PROTECCIÓN: No trigger TP si el neto sería negativo (fees > ganancia)
         notional_est = tr['cqty'] * entry
         fees_est = est_fees(notional_est)
-        is_tp_real = is_tp and (pnl > fees_est * 1.1)  # Al menos 10% de ganancia sobre fees
-        
-        is_sl=(side=='LONG' and mark<=tr['sl']) or (side=='SHORT' and mark>=tr['sl'])
+        is_tp_real = is_tp and (pnl > fees_est * 1.1)
         if is_tp_real or is_sl:
             try:
                 ex.create_order(symbol=sym,type='market',side=cs,amount=tr['cqty'],params={'reduceOnly':True})
